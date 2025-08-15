@@ -1,0 +1,11 @@
+# Python cache and compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+.ipynb_checkpoints
+*.egg-info/
+*.egg
+.vscode/
+.DS_Store
+Thumbs.db
+*example5_time_resolved_data_noise2noise*
