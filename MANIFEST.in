@@ -1,0 +1,11 @@
+include README.md
+include LICENSE
+include requirements.txt
+
+# Notebooks and example data
+recursive-include xasdenoise/examples *.ipynb
+recursive-include xasdenoise/examples/data *
+
+# Keep junk out of the sdist/wheel
+global-exclude __pycache__ *.py[cod] *.so *.dylib .DS_Store
+prune **/.ipynb_checkpoints
