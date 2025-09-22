@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, Union
 from scipy.ndimage import uniform_filter1d
 
 from xasdenoise.utils.smoothness import estimate_smoothness as smoothness_estimation
-from xasdenoise.denoising_methods import denoising_utils
+from xasdenoise.denoising_methods import denoising_utils, regular_denoiser
 
 
 class SmoothnessEstimator:
@@ -89,6 +89,16 @@ class SmoothnessEstimator:
                                      denoiser=None) -> np.ndarray:
         """Estimate smoothness using iterative refinement."""
         
+        if self.config.get('smoothness_use_simple_denoiser'):
+            # if self.verbose >= 1:
+            print("Using a simple denoiser for smoothness estimation")
+                
+            denoise_window = self.config.get('smoothness_denoise_window', 1)
+            values_in_ev = self.config.get('values_in_ev', True)
+            win_points = self.ev_to_points(x, denoise_window, values_in_ev)
+            denoiser = regular_denoiser.RegularDenoiser(method_name='moving_average', window_size=win_points)
+            denoiser.verbose = 0
+            
         if denoiser is None:
             raise ValueError("Denoiser is required for iterative smoothness estimation")
         
@@ -125,7 +135,9 @@ class SmoothnessEstimator:
             return y_avg
         
         denoise_window = self.config.get('smoothness_denoise_window', 1)
-        win_points = self.ev_to_points(x, denoise_window)
+        values_in_ev = self.config.get('values_in_ev', True)
+        win_points = self.ev_to_points(x, denoise_window, values_in_ev)
+
         y_denoised = uniform_filter1d(y_avg, win_points, axis=0)
         
         if self.verbose >= 2:
@@ -140,11 +152,13 @@ class SmoothnessEstimator:
     
     def get_smoothness_windows(self, x: np.ndarray) -> Dict[str, int]:
         """Get window sizes for smoothness estimation in points."""
+        values_in_ev = self.config.get('values_in_ev', True)
+
         return {
-            'initial_polyfit': self.ev_to_points(x, self.config.get('smoothness_polyfit_window0', 3)),
-            'initial_smooth': self.ev_to_points(x, self.config.get('smoothness_smooth_window0', 11)),
-            'refined_polyfit': self.ev_to_points(x, self.config.get('smoothness_polyfit_window', 0.1)),
-            'refined_smooth': self.ev_to_points(x, self.config.get('smoothness_smooth_window', 11))
+            'initial_polyfit': self.ev_to_points(x, self.config.get('smoothness_polyfit_window0', 3), values_in_ev),
+            'initial_smooth': self.ev_to_points(x, self.config.get('smoothness_smooth_window0', 11), values_in_ev),
+            'refined_polyfit': self.ev_to_points(x, self.config.get('smoothness_polyfit_window', 0.1), values_in_ev),
+            'refined_smooth': self.ev_to_points(x, self.config.get('smoothness_smooth_window', 11), values_in_ev)
         }
     
     def refine_smoothness_iteration(self, x: np.ndarray, y_avg: np.ndarray, 
@@ -152,7 +166,7 @@ class SmoothnessEstimator:
                                    edge_energy: float, windows: Dict[str, int], 
                                    denoiser) -> np.ndarray:
         """Perform one iteration of smoothness refinement."""
-        
+            
         # Setup denoiser state
         denoiser_state = self.setup_denoiser_for_iteration(denoiser)
         
@@ -192,6 +206,7 @@ class SmoothnessEstimator:
                 
             return state
         except:
+            print(self.config.get('smoothness_use_simple_denoiser'))
             return None
     
     def restore_denoiser_state(self, denoiser, state):
@@ -287,14 +302,18 @@ class SmoothnessEstimator:
             return mask
         
         return np.ones_like(x, dtype=bool)
-    
-    def ev_to_points(self, x: np.ndarray, win_eV: float) -> int:
+
+    def ev_to_points(self, x: np.ndarray, win_eV: float, values_in_ev: bool) -> int:
         """Convert energy window to number of points."""
-        win = np.argmin(np.cumsum(abs(np.diff(x))) <= win_eV)
+        if values_in_ev:
+            win = np.argmin(np.cumsum(abs(np.diff(x))) <= win_eV)
+        else:
+            win = win_eV
         win = win // 2 * 2 + 1  # Make odd
         win = np.maximum(win, 3)  # At least 3 points
+        win = int(win)
         return win
-    
+        
     def plot_smoothness_results(self, x: np.ndarray, smoothness: np.ndarray, title: str):
         """Plot smoothness estimation results."""
         

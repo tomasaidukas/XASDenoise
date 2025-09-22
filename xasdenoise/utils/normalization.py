@@ -162,7 +162,7 @@ class NormFit:
         else:
             NormY += flat_correction
 
-        return NormY
+        return NormY, edge_jump
 
     def _fit_edge(self, dataX_fit, dataY_fit, edge_parameters, edge_type, p0=None):
         """

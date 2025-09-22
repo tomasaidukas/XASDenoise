@@ -256,8 +256,9 @@ class DataPreprocessor:
         elif mode == 1:
             # Varying noise using sliding window
             noise_window = self.config.get('noise_window', 3)
-            win_points = self._ev_to_points(x, noise_window)
-            
+            values_in_ev = self.config.get('values_in_ev', True)
+            win_points = self._ev_to_points(x, noise_window, values_in_ev)
+                
             noise_estimate = denoising_utils.estimate_noise_std_sliding_window(x, y, win_points)
             
             # Apply smoothing if requested
@@ -295,10 +296,13 @@ class DataPreprocessor:
             y_reference_scaled = y_reference * y_weights
         
         return y_scaled, noise_scaled, y_reference_scaled
-    
-    def _ev_to_points(self, x: np.ndarray, win_eV: float) -> int:
+
+    def _ev_to_points(self, x: np.ndarray, win_eV: float, values_in_ev: bool) -> int:
         """Convert energy window to number of points."""
-        win = np.argmin(np.cumsum(abs(np.diff(x))) <= win_eV)
+        if values_in_ev:
+            win = np.argmin(np.cumsum(abs(np.diff(x))) <= win_eV)
+        else:
+            win = win_eV
         win = win // 2 * 2 + 1  # Make odd
         win = np.maximum(win, 3)  # At least 3 points
         return win

@@ -281,12 +281,13 @@ def remove_glitches(data, glitch_mask0, glitch_fill='interp', exclude_edge=False
                     setattr(data, attr, y)
         setattr(data, 'energy', x)
         
-def normalize_spectrum(data, fitting_funcs=['1','V'], fit_individual=True, downsample=0):
+def normalize_spectrum(data, reference=None, fitting_funcs=['1','V'], fit_individual=True, downsample=0):
     """
     Normalize the spectrum by fitting a model to pre-edge and post-edge regions.
 
     Args:
         data (Spectrum): A Spectrum object containing the spectrum data.
+        reference (Spectrum): A reference Spectrum object for normalization.
         fitting_funcs (list, optional): A list of fitting functions for the pre-edge and post-edge regions.
         fit_individual (bool, optional): If True, fits each time instance individually.
         downsample (int, optional): The downsampling factor for normalization.
@@ -302,24 +303,32 @@ def normalize_spectrum(data, fitting_funcs=['1','V'], fit_individual=True, downs
     normalise = normalization.NormFit()
     normalise.downsample = downsample
     normalise.e0 = edge
-    
+
+    if reference is not None:
+        y_ref = reference.spectrum
+    else:
+        y_ref = y
+
     # Use a rough guess for the pre/post edge fitting parameters
     pre_edge_fit_params = ([x_fit[data.pre_edge_region_indices[0]] - edge, 
                             x_fit[data.pre_edge_region_indices[-1]] - edge, 
-                            data.metadata.get('fitting_func_pre_edge', fitting_funcs[0])])
+                            data.metadata.get('pre_edge_fit_func', fitting_funcs[0])])
     post_edge_fit_params = ([x_fit[data.post_edge_region_indices[0]] - edge, 
                             x_fit[data.post_edge_region_indices[-1]] - edge, 
-                            data.metadata.get('fitting_func_post_edge', fitting_funcs[-1])])
+                            data.metadata.get('post_edge_fit_func', fitting_funcs[-1])])
         
     # Normalize spectrum using the best pre/post fits
     if fit_individual:
+        edge_step = np.zeros(y.shape[1])
         for time in range(y.shape[1]):
-            data.spectrum[:, time] = normalise.norm(
-                x_fit, y[:, time], y[:, time], pre_edge_fit_params, post_edge_fit_params, edge
+            data.spectrum[:, time], edge_step[time] = normalise.norm(
+                x_fit, y_ref[:, time], y[:, time], pre_edge_fit_params, post_edge_fit_params, edge
             )
     else:
-        data.spectrum = normalise.norm(x_fit, y_fit, y, pre_edge_fit_params, post_edge_fit_params, edge)
+        data.spectrum, edge_step = normalise.norm(x_fit, y_fit, y, pre_edge_fit_params, post_edge_fit_params, edge)
         # data.spectrum = y / np.mean(y, axis=0) * np.mean(data.spectrum, axis=0)
+    
+    data.edge_step = edge_step
 
 def estimate_background(data):
     """

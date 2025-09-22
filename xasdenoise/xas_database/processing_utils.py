@@ -4,7 +4,7 @@ Functions used to process a list of Spectrum objects.
 
 import numpy as np
 from scipy.interpolate import interp1d
-from . import preprocess_spectrum as preproc
+from xasdenoise.xas_data import preprocess_spectrum as preproc
 from xasdenoise.utils import artefacts
 from multiprocessing import Pool
 
@@ -553,3 +553,17 @@ def sort_by_noise(spectrum_list):
         spectrum_list (list): List of Spectrum objects.
     """
     spectrum_list.sort(key=lambda s: s.noise, reverse=True)
+
+def remove_spectrum_attributes(spectrum_list, attributes):
+    """
+    Remove specified attributes from every spectra.
+
+    For example arrays I0, I1 might be unwanted to minimize data storage size.
+
+    Args:
+        spectrum_list (list): List of Spectrum objects to process
+        attributes (list): List of attribute names to remove
+    """
+    for spectrum in spectrum_list:
+        for attr in attributes:
+            setattr(spectrum, attr, None)

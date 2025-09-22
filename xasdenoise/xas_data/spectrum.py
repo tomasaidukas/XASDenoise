@@ -212,15 +212,15 @@ class Spectrum:
                 setattr(self, attr, np.delete(array, indices, axis=0))
                 
         # Adjust pre-edge and post-edge regions if defined
-        if hasattr(self.metadata, 'pre_edge_min_E') and (self.metadata["pre_edge_min_E"] < self.energy[0]):
-            self.metadata["pre_edge_min_E"] = self.energy[0]
-        if hasattr(self.metadata, 'pre_edge_max_E') and (self.metadata["pre_edge_max_E"] > self.energy[-1]):
-            self.metadata["pre_edge_max_E"] = self.edge - 30 if (self.edge-30) > self.energy[0] else self.energy[10]
-        if hasattr(self.metadata, 'post_edge_min_E') and (self.metadata["post_edge_min_E"] < self.energy[0]):
-            self.metadata["post_edge_min_E"] = self.edge + 30 if (self.edge+30) < self.energy[-1] else self.energy[-10]
-        if hasattr(self.metadata, 'post_edge_max_E') and (self.metadata["post_edge_max_E"] > self.energy[-1]):
-            self.metadata["post_edge_max_E"] = self.energy[-1]
-            
+        if hasattr(self.metadata, 'pre_edge_min_E') and (self.metadata["pre_edge_min_E"] < (self.energy[0]-self.edge)):
+            self.metadata["pre_edge_min_E"] = self.energy[0]-self.edge
+        if hasattr(self.metadata, 'pre_edge_max_E') and (self.metadata["pre_edge_max_E"] > (self.energy[-1]-self.edge)):
+            self.metadata["pre_edge_max_E"] = -30 if -30 > (self.energy[0]-self.edge) else (self.energy[10]-self.edge)
+        if hasattr(self.metadata, 'post_edge_min_E') and (self.metadata["post_edge_min_E"] < (self.energy[0]-self.edge)):
+            self.metadata["post_edge_min_E"] = 30 if 30 < (self.energy[-1]-self.edge) else (self.energy[-10]-self.edge)
+        if hasattr(self.metadata, 'post_edge_max_E') and (self.metadata["post_edge_max_E"] > (self.energy[-1]-self.edge)):
+            self.metadata["post_edge_max_E"] = (self.energy[-1]-self.edge)
+
     def delete_time_indices(self, indices: np.ndarray):
         """
         Delete specified time indices.
@@ -265,14 +265,15 @@ class Spectrum:
                     setattr(self, attr, array[indices, :])
                     
         # Adjust pre-edge and post-edge regions if defined
-        if hasattr(self.metadata, 'pre_edge_min_E') and (self.metadata["pre_edge_min_E"] < self.energy[0]):
-            self.metadata["pre_edge_min_E"] = self.energy[0]
-        if hasattr(self.metadata, 'pre_edge_max_E') and (self.metadata["pre_edge_max_E"] > self.energy[-1]):
-            self.metadata["pre_edge_max_E"] = self.edge - 30 if (self.edge-30) > self.energy[0] else self.energy[10]
-        if hasattr(self.metadata, 'post_edge_min_E') and (self.metadata["post_edge_min_E"] < self.energy[0]):
-            self.metadata["post_edge_min_E"] = self.edge + 30 if (self.edge+30) < self.energy[-1] else self.energy[-10]
-        if hasattr(self.metadata, 'post_edge_max_E') and (self.metadata["post_edge_max_E"] > self.energy[-1]):
-            self.metadata["post_edge_max_E"] = self.energy[-1]
+        if hasattr(self.metadata, 'pre_edge_min_E') and (self.metadata["pre_edge_min_E"] < (self.energy[0]-self.edge)):
+            self.metadata["pre_edge_min_E"] = self.energy[0]-self.edge
+        if hasattr(self.metadata, 'pre_edge_max_E') and (self.metadata["pre_edge_max_E"] > (self.energy[-1]-self.edge)):
+            self.metadata["pre_edge_max_E"] = -30 if -30 > (self.energy[0]-self.edge) else (self.energy[10]-self.edge)
+        if hasattr(self.metadata, 'post_edge_min_E') and (self.metadata["post_edge_min_E"] < (self.energy[0]-self.edge)):
+            self.metadata["post_edge_min_E"] = 30 if 30 < (self.energy[-1]-self.edge) else (self.energy[-10]-self.edge)
+        if hasattr(self.metadata, 'post_edge_max_E') and (self.metadata["post_edge_max_E"] > (self.energy[-1]-self.edge)):
+            self.metadata["post_edge_max_E"] = (self.energy[-1]-self.edge)
+
                 
     def crop_time_indices(self, indices: np.ndarray):
         """
@@ -425,14 +426,14 @@ class Spectrum:
                 
         # Update metadata arrays relevant to data normalization and background estimation
         try:
-            if self.metadata["pre_edge_min_E"] < self.energy[0]:
-                self.metadata["pre_edge_min_E"] = self.energy[0]
-            if self.metadata["post_edge_max_E"] > self.energy[-1]:
-                self.metadata["post_edge_max_E"] = self.energy[-1]
+            if self.metadata["pre_edge_min_E"] < (self.energy[0]-self.edge):
+                self.metadata["pre_edge_min_E"] = self.energy[0] - self.edge
+            if self.metadata["post_edge_max_E"] > (self.energy[-1]-self.edge):
+                self.metadata["post_edge_max_E"] = self.energy[-1] - self.edge
             if self.metadata["pre_edge_max_E"] - self.metadata["pre_edge_min_E"] < 10:
-                self.metadata["pre_edge_max_E"] = self.edge - 30
+                self.metadata["pre_edge_max_E"] = -30
             if self.metadata["post_edge_max_E"] - self.metadata["post_edge_min_E"] < 10:
-                self.metadata["post_edge_min_E"] = self.edge + 30
+                self.metadata["post_edge_min_E"] = 30
         except:
             pass       
         
@@ -924,8 +925,16 @@ class Spectrum:
         Returns:
             Optional[np.ndarray]: Indices for the specified range, or None if no indices are found.
         """
-        min_e = min_e if min_e is not None else self.energy[0]
-        max_e = max_e if max_e is not None else self.energy[-1]
+        if min_e is not None:
+            min_e = min_e + self.edge
+        else:
+            min_e = self.energy[0]
+
+        if max_e is not None:
+            max_e = max_e + self.edge
+        else:
+            max_e = self.energy[-1]
+            
         indices = np.where((self.energy > min_e) & (self.energy < max_e))[0]
         return indices if indices.size > 0 else None
 
@@ -942,47 +951,33 @@ class Spectrum:
         """
         # First, try to get the region boundaries from metadata or compute them if needed
         if region == 'pre_edge':
-            pre_edge_min = self.metadata.get("pre_edge_min_E", None)
-            pre_edge_max = self.metadata.get("pre_edge_max_E", None)
-
-            # Auto-compute if not available
-            if pre_edge_min is None or pre_edge_max is None or pre_edge_min < self.energy[0] or pre_edge_max < self.energy[0]:
-                pre_edge_min = self.energy[0]
-                pre_edge_max = self.edge - 30 if (self.edge-30) > self.energy[0] else self.energy[10]
-                # Store in metadata for future use
-                if hasattr(self, 'metadata') and self.metadata is not None:
-                    self.metadata["pre_edge_min_E"] = pre_edge_min
-                    self.metadata["pre_edge_max_E"] = pre_edge_max
-                
+            pre_edge_min = self.metadata.get("pre_edge_min_E", -np.inf)
+            pre_edge_max = self.metadata.get("pre_edge_max_E", -30)
+            
+            if pre_edge_max < self.energy[0] - self.edge:
+                pre_edge_max = (self.energy[0]-self.edge)*0.1
+            
             region_range = (pre_edge_min, pre_edge_max)
-                
+
         elif region == 'post_edge':
-            post_edge_min = self.metadata.get("post_edge_min_E", None)
-            post_edge_max = self.metadata.get("post_edge_max_E", None)
+            post_edge_min = self.metadata.get("post_edge_min_E", 30)
+            post_edge_max = self.metadata.get("post_edge_max_E", np.inf)
             
-            # Auto-compute if not available
-            if post_edge_min is None or post_edge_max is None:
-                post_edge_min = self.edge + 30 if (self.edge+30) < self.energy[-1] else self.energy[-10]                
-                post_edge_max = self.energy[-1]
-                
-                # Store in metadata for future use
-                if hasattr(self, 'metadata') and self.metadata is not None:
-                    self.metadata["post_edge_min_E"] = post_edge_min
-                    self.metadata["post_edge_max_E"] = post_edge_max
-            
+            if post_edge_min > self.energy[-1] - self.edge:
+                post_edge_min = (self.energy[-1]-self.edge)*0.1
             region_range = (post_edge_min, post_edge_max)
             
         elif region == 'xanes':
             # XANES region is typically defined relative to the edge
             if not hasattr(self, 'edge') or self.edge is None:
                 raise ValueError("Edge energy must be defined to determine XANES region")
-            region_range = (self.edge - 20, self.edge + 30)
+            region_range = (-20, 30)
             
         elif region == 'exafs':
             # EXAFS region is typically defined relative to the edge
             if not hasattr(self, 'edge') or self.edge is None:
                 raise ValueError("Edge energy must be defined to determine EXAFS region")
-            region_range = (self.edge + 30, self.energy[-1])
+            region_range = (30, np.inf)
             
         else:
             raise ValueError(f"Invalid region specified: {region}")

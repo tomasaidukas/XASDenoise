@@ -243,36 +243,36 @@ class GPDenoiser:
         Returns:
             torch.device: The computation device to use.
         """
-        
-        # Prefer CUDA if available, else Apple MPS, else CPU
-        if TORCH_AVAILABLE and torch.cuda.is_available():
-            device = torch.device(f"cuda:{self.gpu_index}")
-            try:
-                torch.cuda.set_device(device)  # Specify your GPU device index
-                torch.empty(1, device=device)  # Initialize CUDA context on the target GPU
-                self._clean_gpu_memory()
-            except Exception:
-                pass
-
-            if self.verbose:
+        if self.use_gpu:
+            # Prefer CUDA if available, else Apple MPS, else CPU
+            if TORCH_AVAILABLE and torch.cuda.is_available():
+                device = torch.device(f"cuda:{self.gpu_index}")
                 try:
-                    print(f"Using GPU index: {self.gpu_index}, {torch.cuda.get_device_name(device)}")
+                    torch.cuda.set_device(device)  # Specify your GPU device index
+                    torch.empty(1, device=device)  # Initialize CUDA context on the target GPU
+                    self._clean_gpu_memory()
                 except Exception:
-                    print(f"Using CUDA device: {device}")
-        elif TORCH_AVAILABLE and MPS_AVAILABLE:
-            device = torch.device("mps")
-            # MPS prefers float32; adjust dtype for compatibility
-            self.dtype = torch.float32
-            if self.verbose:
-                backend_info = "(built)" if MPS_BUILT else "(runtime)"
-                print(f"Using Apple GPU via MPS {backend_info} backend")
-        else:
-            device = torch.device("cpu")
-            if self.verbose:
-                print("Using CPU.")
-        
-        self.device = device
-        return device
+                    pass
+
+                if self.verbose:
+                    try:
+                        print(f"Using GPU index: {self.gpu_index}, {torch.cuda.get_device_name(device)}")
+                    except Exception:
+                        print(f"Using CUDA device: {device}")
+            elif TORCH_AVAILABLE and MPS_AVAILABLE:
+                device = torch.device("mps")
+                # MPS prefers float32; adjust dtype for compatibility
+                self.dtype = torch.float32
+                if self.verbose:
+                    backend_info = "(built)" if MPS_BUILT else "(runtime)"
+                    print(f"Using Apple GPU via MPS {backend_info} backend")
+            else:
+                device = torch.device("cpu")
+                if self.verbose:
+                    print("Using CPU.")
+            
+            self.device = device
+            return device
 
     def _clean_gpu_memory(self):
         """

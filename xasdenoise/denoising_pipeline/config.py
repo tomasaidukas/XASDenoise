@@ -53,6 +53,7 @@ class PipelineConfig:
     smoothness_denoise_window: float = 1  # eV
     smoothness_downsampling_pts: int = 1000
     smoothness_downsampling_method: Optional[str] = None  # 'uniform', 'smoothness', 'kspace'
+    smoothness_use_simple_denoiser: bool = False # instead of the current denoiser method (e.g., GP) use a simpler moving average approach
     
     # ============ Denoising Parameters ============
     # Downsampling settings
@@ -65,7 +66,8 @@ class PipelineConfig:
     
     # ============ General Parameters ============
     verbose: int = 0
-    
+    values_in_ev: bool = True  # if values for windows are in eV, then convert to points (if false, then assume values are in number of points)
+
     def __post_init__(self):
         """Post-initialization validation and setup."""
         self._validate_parameters()
@@ -123,6 +125,7 @@ class PipelineConfig:
             'noise_window': self.noise_window,
             'noise_estimation_smoothing': self.noise_estimation_smoothing,
             'apply_data_mask': self.apply_data_mask,
+            'values_in_ev': self.values_in_ev,
             'verbose': self.verbose
         }
     
@@ -143,7 +146,9 @@ class PipelineConfig:
             'smoothness_denoise_window': self.smoothness_denoise_window,
             'smoothness_downsampling_pts': self.smoothness_downsampling_pts,
             'smoothness_downsampling_method': self.smoothness_downsampling_method,
+            'smoothness_use_simple_denoiser': self.smoothness_use_simple_denoiser,
             'data_downsampling_method': self.data_downsampling_method,
+            'values_in_ev': self.values_in_ev,
             'verbose': self.verbose
         }
     

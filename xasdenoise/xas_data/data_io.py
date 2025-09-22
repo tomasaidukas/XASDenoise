@@ -159,11 +159,14 @@ def load_spectra(paths, metadata, paths_I0=None, paths_I1=None):
     if paths_I0 is None: paths_I0 = [None] * len(paths)
     if paths_I1 is None: paths_I1 = [None] * len(paths)
 
-    try:
-        metadata_list = [row for _, row in metadata.iterrows()]
-    except:
-        metadata_list = [metadata] * len(paths)
-    
+    if not isinstance(metadata, list):
+        try:
+            metadata_list = [row for _, row in metadata.iterrows()]
+        except:
+            metadata_list = [metadata] * len(paths)
+    else:
+        metadata_list = metadata
+        
     # sequential loading
     # path_metadata_pairs = list(zip(paths, metadata_list))
     # spectra = []
@@ -280,7 +283,7 @@ def load_spectra_from_h5(filename, element=None, compound=None):
     with h5py.File(filename, 'r') as h5file:
         for spectrum_name in h5file:
             # Skip non-spectrum groups (e.g., processing_metadata)
-            if spectrum_name == 'processing_metadata':
+            if spectrum_name in ['processing_metadata', 'database_metadata']:
                 continue
                 
             grp = h5file[spectrum_name]

@@ -29,13 +29,12 @@ class EncoderDenoiser:
     
     Note: Requires PyTorch. If not available, raises ImportError on initialization.
     """
-    def __init__(self, model_type='conv', signal_length=None, device='auto', gpu_index=0, num_layers=4, kernel_size=7, channels=None, dropout_rate=0):
+    def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, channels=None, dropout_rate=0):
         """
         Initialize the EncoderDenoiser with a specified autoencoder architecture.
 
         Args:
-            model_type (str): Type of autoencoder ('linear', 'conv', 'improved_conv', 'unet', 'transformer'). Defaults to 'conv'.
-            signal_length (int, optional): Length of the input signal (required for 'linear' model). Defaults to None.
+            model_type (str): Type of autoencoder (only 'conv' is implemented). Defaults to 'conv'.
             device (str): Device to use for training and inference. Options: 'auto', 'cpu', 'cuda', 'mps'. Defaults to 'auto'.
             gpu_index (int): GPU index to use when device is 'cuda'. Defaults to 0.
             num_layers (int): Number of layers in the autoencoder. Defaults to 4.
@@ -68,14 +67,10 @@ class EncoderDenoiser:
         # Initialize the computation device
         self.gpu_device = self._initialize_device()
         
-        if model_type == 'linear':
-            if signal_length is None:
-                raise ValueError("For 'linear' model, 'signal_length' must be provided.")
-            self.encoder_model = DenoisingAutoencoder(signal_length, dropout_rate=dropout_rate).to(self.device)
-        elif model_type == 'conv':
+        if model_type == 'conv':
             self.encoder_model = ConvDenoisingAutoencoder(num_layers=self.num_layers, kernel_size=self.kernel_size, channels=channels, dropout_rate=dropout_rate).to(self.device)
         else:
-            raise ValueError(f"Unknown model type: {model_type}. Choose 'linear', 'conv'.")
+            raise ValueError(f"Unknown model type: {model_type}. Only 'conv' is implemented.")
 
         self.encoder_model.train()  # Set the model to training mode
       
@@ -666,38 +661,6 @@ class EncoderDenoiser:
         return y_denoised, y_error, y_noise
 
 if TORCH_AVAILABLE:
-    class DenoisingAutoencoder(nn.Module):
-        def __init__(self, signal_length, dropout_rate=0):
-            super().__init__()
-            self.layer_dim = 64
-            
-            # Encoder with dropout
-            self.encoder = nn.Sequential(
-                nn.Linear(signal_length, self.layer_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity(),
-                nn.Linear(self.layer_dim, self.layer_dim // 2),
-                nn.ReLU(),
-                nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity(),
-                nn.Linear(self.layer_dim // 2, self.layer_dim // 4)
-            )
-            
-            # Decoder with dropout
-            self.decoder = nn.Sequential(
-                nn.Linear(self.layer_dim // 4, self.layer_dim // 2),
-                nn.ReLU(),
-                nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity(),
-                nn.Linear(self.layer_dim // 2, self.layer_dim),
-                nn.ReLU(),
-                nn.Dropout(dropout_rate) if dropout_rate > 0 else nn.Identity(),
-                nn.Linear(self.layer_dim, signal_length)
-            )
-        
-        def forward(self, x):
-            encoded = self.encoder(x)
-            decoded = self.decoder(encoded)
-            return decoded
-
     class ConvDenoisingAutoencoder(nn.Module):
         def __init__(self, num_layers=4, kernel_size=7, channels=None, dropout_rate=0):
             super().__init__()

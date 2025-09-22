@@ -9,3 +9,5 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *example5_time_resolved_data_noise2noise*
+examples_database/
+**/examples_database/

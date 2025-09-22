@@ -82,6 +82,9 @@ class DenoisingPipeline:
         self.original_energy = spectrum_obj.energy.copy()
         self.original_spectrum = spectrum_obj.spectrum.copy()
         
+        if data_mask is None and hasattr(spectrum_obj, 'data_mask'):
+            data_mask = spectrum_obj.data_mask
+            
         # Store additional data
         self.processing_metadata = {
             'data_mask': data_mask,
@@ -92,12 +95,13 @@ class DenoisingPipeline:
         
         return self
     
-    def process(self, denoiser=None) -> 'DenoisingPipeline':
+    def process(self, denoiser=None, return_denoised_data=False) -> 'DenoisingPipeline':
         """
         Run the complete denoising pipeline.
         
         Args:
             denoiser: Optional denoiser to use (overrides constructor)
+            return_denoised_data: If True, returns denoised data before post-processing.
             
         Returns:
             Self for method chaining
@@ -139,8 +143,39 @@ class DenoisingPipeline:
                 print(f'Pipeline failed: {str(e)}')
             raise
         
-        return self
+        if return_denoised_data:
+            return denoised_data
+        else:
+            return self
     
+    def preprocess_data(self) -> Dict[str, Any]:
+        """
+        Return preprocessed data without denoising.
+            
+        Returns:
+            Preprocessed data dictionary
+        """
+        # Validate that data has been loaded
+        if self.spectrum_obj is None:
+            raise ValueError("Data must be loaded before processing. Call load_data() first.")
+        
+        if self.config.verbose > 0:
+            print('============= Starting XAS Denoising Pipeline =============')
+
+        try:
+            # Step 1: Preprocessing
+            preprocessed_data = self._run_preprocessing()
+
+            # Step 2: Warping
+            warped_data = self._run_warping(preprocessed_data)
+
+        except Exception as e:
+            if self.config.verbose > 0:
+                print(f'Data preprocessing failed: {str(e)}')
+            raise
+        
+        return preprocessed_data    
+            
     def _run_preprocessing(self) -> Dict[str, Any]:
         """Run the preprocessing step."""
         
@@ -259,10 +294,10 @@ class DenoisingPipeline:
             if time_instance is not None:
                 if time_instance >= n_time_instances:
                     raise ValueError(f"time_instance {time_instance} exceeds available instances ({n_time_instances})")
-                y_original = y_original[:, time_instance:time_instance+1]
-                y_denoised = y_denoised[:, time_instance:time_instance+1]
+                y_original = y_original[:, time_instance][:, None]
+                y_denoised = y_denoised[:, time_instance][:, None]
                 if y_error is not None:
-                    y_error = y_error[:, time_instance:time_instance+1]
+                    y_error = y_error[:, time_instance][:, None]
                 plot_single = True
             else:
                 plot_single = False
@@ -303,8 +338,14 @@ class DenoisingPipeline:
             alpha_val = max(0.1, 0.5 / n_time_instances)
             
             plt.plot(x_data, y_original, linestyle="None", marker="o", markersize=1,
-                    color="tab:blue", alpha=alpha_val, label="Original")
+                    color="tab:blue", alpha=alpha_val)
             plt.plot(x_data, y_denoised, color="tab:orange", linewidth=1,
+                    alpha=alpha_val)
+            
+            # Add single labels by plotting one line separately
+            plt.plot(x_data, y_original[:, 0], linestyle="None", marker="o", markersize=1,
+                    color="tab:blue", alpha=alpha_val, label="Original")
+            plt.plot(x_data, y_denoised[:, 0], color="tab:orange", linewidth=1,
                     alpha=alpha_val, label="Denoised")
             
             # Add error bands for first time instance if available
