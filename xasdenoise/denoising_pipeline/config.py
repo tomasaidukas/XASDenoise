@@ -80,7 +80,7 @@ class PipelineConfig:
             raise ValueError(f"data_baseline_removal must be one of {valid_baseline_methods}")
         
         # Validate warping method
-        valid_warping_methods = [None, 'kspace', 'smoothness', 'kspace_exafs_smoothness_xanes']
+        valid_warping_methods = [None, 'kspace', 'smoothness', 'kspace_exafs_smoothness_xanes', 'log']
         if self.input_warping_method not in valid_warping_methods:
             raise ValueError(f"input_warping_method must be one of {valid_warping_methods}")
         

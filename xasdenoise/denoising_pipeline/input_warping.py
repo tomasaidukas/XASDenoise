@@ -120,6 +120,9 @@ class InputWarper:
                 raise ValueError(f"Smoothness must be 1D after squeezing, got shape {smoothness_1d.shape}")
             return self._combined_warping(x, edge_energy, smoothness_1d)
         
+        elif self.method == 'log':
+            return np.log(x - x.min() + 1e-6)
+        
         elif self.method is None or self.method == 'none':
             return x.copy()
         

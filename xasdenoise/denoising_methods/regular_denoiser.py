@@ -586,7 +586,10 @@ class RegularDenoiser:
         Raises:
             RuntimeError: If PCA is attempted on single-instance data.
         """
-        assert y.shape[1] > modes, "Number of modes/components to be removed should be less than the number of time instances"
+        
+        if y.shape[1] <= modes:
+            warnings.warn(f"Number of modes ({modes}) should be less than the number of time instances ({y.shape[1]}). Returning original signal without PCA denoising.")
+            return y
 
         if y.shape[1] > 1:
             # Center the data
