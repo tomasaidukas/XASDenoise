@@ -475,8 +475,8 @@ class XASDatabase:
     # ========================================================================
     # XAS DATABASE LOADING/SAVING FUNCTIONS
     # ========================================================================
-    
-    def load_from_h5(self, filepath: str) -> None:
+
+    def load_from_h5(self, filepath: str, element_to_load=None, compound_to_load=None) -> None:
         """
         Load XAS database from HDF5 file.
         
@@ -510,7 +510,7 @@ class XASDatabase:
 
         
         # Load spectra using existing data_io function
-        loaded_spectra = data_io.load_spectra_from_h5(filepath)
+        loaded_spectra = data_io.load_spectra_from_h5(filepath, element=element_to_load, compound=compound_to_load)
         if not isinstance(loaded_spectra, list):
             loaded_spectra = [loaded_spectra]
         
