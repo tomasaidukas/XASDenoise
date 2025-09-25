@@ -254,7 +254,7 @@ class DenoisingPipeline:
         
         return self.results['denoised'], self.results['error'], self.results['noise']
     
-    def plot_results(self, fig_size: Tuple[int, int] = (12, 8), title: Optional[str] = None, 
+    def plot_results(self, fig_size: Tuple[int, int] = (12, 5), title: Optional[str] = None, 
                      full_range: bool = True, plot_kspace: bool = False, 
                      time_instance: Optional[int] = None, show_error: bool = True):
         """

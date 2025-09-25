@@ -31,7 +31,9 @@ class XASMetadata:
     coordination_number: Optional[float] = None
     chemical_name: Optional[str] = None # e.g., "Manganese ..."
     chemical_formula: Optional[str] = None # e.g., "LiMnO4"
-
+    phase: Optional[str] = None # e.g., "Phase 1", "Phase 2" for polymorphs
+    structure: Optional[str] = None
+    
     # === File Paths ===
     path_spectrum: Optional[str] = None
     path_I0: Optional[str] = None

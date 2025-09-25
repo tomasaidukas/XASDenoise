@@ -416,9 +416,9 @@ class InteractiveDataProcessing:
             normalise.downsample = 1
             # for time in range(y.shape[1]):                
                 # normalize the spectrum
-                # y[:,time] = normalise.norm(x_fit[data_mask], y[data_mask,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
-                # y[:,time] = normalise.norm(x_fit, y[:,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
-            y = normalise.norm(x_fit, y, y, self.pre_edge_fit_params, self.post_edge_fit_params, edge)
+                # y[:,time], _ = normalise.norm(x_fit[data_mask], y[data_mask,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
+                # y[:,time], _ = normalise.norm(x_fit, y[:,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
+            y, _ = normalise.norm(x_fit, y, y, self.pre_edge_fit_params, self.post_edge_fit_params, edge)
                 
             self.update_plot_normalization(y)
         
@@ -441,8 +441,8 @@ class InteractiveDataProcessing:
             normalise.downsample = 1
             for time in range(y.shape[1]):                
                 # normalize the spectrum
-                # y[:,time] = normalise.norm(x_fit[data_mask], y[data_mask,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
-                y[:,time] = normalise.norm(x_fit, y[:,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
+                # y[:,time], _ = normalise.norm(x_fit[data_mask], y[data_mask,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
+                y[:,time], _ = normalise.norm(x_fit, y[:,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
             
             self.spectrum_list[self.compound_idx].spectrum = y.copy()
             y = self.spectrum_list[self.compound_idx].time_averaged_spectrum
