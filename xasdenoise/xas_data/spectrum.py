@@ -231,13 +231,13 @@ class Spectrum:
         """
         for attr in self.y_arrays:
             array = getattr(self, attr)
-            if array is not None and array.ndim > 1:
+            if array is not None and array.ndim > 1 and array.shape[1] > 1:
                 setattr(self, attr, np.delete(array, indices, axis=1))
 
         # also apply to "new_arrays" if they exist
         for attr in self.new_arrays:
             array = getattr(self, attr)
-            if array is not None and array.ndim > 1:
+            if array is not None and array.ndim > 1 and array.shape[1] > 1:
                 setattr(self, attr, np.delete(array, indices, axis=1))
                 
     def crop_energy_indices(self, indices: np.ndarray):
