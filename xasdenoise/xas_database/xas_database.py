@@ -514,6 +514,11 @@ class XASDatabase:
         if not isinstance(loaded_spectra, list):
             loaded_spectra = [loaded_spectra]
         
+        # Take only a fraction of the databases if only a fraction of elements/compounds was requested
+        if element_to_load is not None or compound_to_load is not None:
+            print(f"Loaded {len(loaded_spectra)} spectra matching element={element_to_load}, compound={compound_to_load}")
+            self.database_metadata = [m for m in self.database_metadata if (element_to_load is None or m.element == element_to_load) and (compound_to_load is None or m.compound == compound_to_load)]
+        
         # Loading is asynchronous so the order between database and loaded spectra is not the same
         # Sort accordingly if metadata was loaded
         if self.database_metadata and len(self.database_metadata) == len(loaded_spectra):
