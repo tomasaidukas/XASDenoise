@@ -202,13 +202,14 @@ class Spectrum:
         self.energy = np.delete(self.energy, indices)
         for attr in self.y_arrays:
             array = getattr(self, attr)
-            if array is not None:
+            if array is not None and array.shape[0] > 1:
                 setattr(self, attr, np.delete(array, indices, axis=0))        
         
         # also apply to "new_arrays" if they exist
         for attr in self.new_arrays:
             array = getattr(self, attr)
-            if array is not None:
+            if array is not None and array.shape[0] > 1:
+                print(attr, array.shape, indices.shape)
                 setattr(self, attr, np.delete(array, indices, axis=0))
                 
         # Adjust pre-edge and post-edge regions if defined
@@ -249,7 +250,7 @@ class Spectrum:
         self.energy = self.energy[indices]
         for attr in self.y_arrays:
             array = getattr(self, attr)
-            if array is not None:
+            if array is not None and array.shape[0] > 1:
                 if array.ndim == 1:  # 1D array
                     setattr(self, attr, array[indices])
                 elif array.ndim == 2:  # 2D array
@@ -258,7 +259,7 @@ class Spectrum:
         # also crop the "new_arrays" if they exist
         for attr in self.new_arrays:
             array = getattr(self, attr)
-            if array is not None:
+            if array is not None and array.shape[0] > 1:
                 if array.ndim == 1:
                     setattr(self, attr, array[indices])
                 elif array.ndim == 2:
