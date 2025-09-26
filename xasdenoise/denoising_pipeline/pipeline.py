@@ -254,7 +254,7 @@ class DenoisingPipeline:
         
         return self.results['denoised'], self.results['error'], self.results['noise']
     
-    def plot_results(self, figsize: Tuple[int, int] = (8, 6), title: Optional[str] = None, 
+    def plot_results(self, figsize: Tuple[int, int] = (8, 12), title: Optional[str] = None, 
                      full_range: bool = True, plot_kspace: bool = False, 
                      time_instance: Optional[int] = None, show_error: bool = True):
         """
@@ -335,7 +335,7 @@ class DenoisingPipeline:
                                color="tab:orange", alpha=0.3, label=r"95% confidence interval")
         else:
             # Multiple time instances
-            alpha_val = max(0.1, 0.5 / n_time_instances)
+            alpha_val = max(0.2, 0.5 / n_time_instances)
             
             plt.plot(x_data, y_original, linestyle="None", marker="o", markersize=1,
                     color="tab:blue", alpha=alpha_val)
@@ -344,9 +344,8 @@ class DenoisingPipeline:
             
             # Add single labels by plotting one line separately
             plt.plot(x_data, y_original[:, 0], linestyle="None", marker="o", markersize=1,
-                    color="tab:blue", alpha=alpha_val, label="Original")
-            plt.plot(x_data, y_denoised[:, 0], color="tab:orange", linewidth=1,
-                    alpha=alpha_val, label="Denoised")
+                    color="tab:blue", label="Original")
+            plt.plot(x_data, y_denoised[:, 0], color="tab:orange", linewidth=1, label="Denoised")
             
             # Add error bands for first time instance if available
             if y_error is not None and np.sum(y_error) > 0:
@@ -414,7 +413,7 @@ class DenoisingPipeline:
                                    ky_denoised[:, 0] + ky_error[:, 0]*2,
                                    color="tab:orange", alpha=0.3)#, label=r"95% confidence interval")
             else:
-                alpha_val = max(0.1, 0.5 / n_time_instances)
+                alpha_val = max(0.2, 0.5 / n_time_instances)
                 plt.plot(k_data, ky_original, linestyle="None", marker="o", markersize=1,
                         color="tab:blue", alpha=alpha_val)#, label="Original")
                 plt.plot(k_data, ky_denoised, color="tab:orange", linewidth=1,

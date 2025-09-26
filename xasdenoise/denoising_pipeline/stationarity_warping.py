@@ -228,7 +228,7 @@ class DataWarper:
             y2 (array): Second domain y-coordinates.
             title (str): Plot title.
         """
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
         
         # First plot: Original domain data
         try:
