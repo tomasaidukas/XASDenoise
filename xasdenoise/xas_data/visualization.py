@@ -378,8 +378,8 @@ def plot_spectrum_descriptor(
 def plot_spectrum_time_instances(
     data: Spectrum,
     title: str = '',
-    vertical_displacement_offset: float = 0.5,
-    time_instance_number: Optional[int] = None,
+    time_instance_number: int = 10,
+    vertical_displacement_offset: Optional[float] = None,
     time_binning_size: Optional[int] = None,
     crop_min: Optional[int] = None,
     crop_max: Optional[int] = None,
@@ -390,8 +390,8 @@ def plot_spectrum_time_instances(
     Args:
         data (Spectrum): The spectrum data.
         title (str): Title of the plot. Defaults to ''.
-        vertical_displacement_offset (float): Offset for vertical displacement. Defaults to 0.5.
-        time_instance_number (Optional[int]): Which time instance to plot. Defaults to None.
+        time_instance_number (int): Number of time instances to plot. Defaults to 10.
+        vertical_displacement_offset (Optional[float]): Offset for vertical displacement. Defaults to None.
         time_binning_size (Optional[int]): Size of the time binning. Defaults to None.
         crop_min (Optional[int]): Minimum crop around the edge. Defaults to None.
         crop_max (Optional[int]): Maximum crop around the edge. Defaults to None.
@@ -400,6 +400,9 @@ def plot_spectrum_time_instances(
 
     label = getattr(data, 'compound', '__nolegend__')
     crop = get_crop(data.energy, data.edge, crop_min or 0, crop_max or 0) if crop_min or crop_max else None
+
+    if vertical_displacement_offset is None:
+        vertical_displacement_offset = data.spectrum[:, 0].mean()
 
     if time_instance_number is not None:
         time_indices = np.linspace(0, data.spectrum.shape[1]-1, time_instance_number).astype(int)
