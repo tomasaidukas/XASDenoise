@@ -337,15 +337,15 @@ class DenoisingPipeline:
             # Multiple time instances
             alpha_val = max(0.2, 0.5 / n_time_instances)
             
+            # Add single labels by plotting one line separately
+            plt.plot(x_data, y_original[:, 0], linestyle="None", marker="o", markersize=1,
+                    color="tab:blue", alpha=0.3, label="Original")
+            plt.plot(x_data, y_denoised[:, 0], color="tab:orange", linewidth=1, label="Denoised")
+            
             plt.plot(x_data, y_original, linestyle="None", marker="o", markersize=1,
                     color="tab:blue", alpha=alpha_val)
             plt.plot(x_data, y_denoised, color="tab:orange", linewidth=1,
                     alpha=alpha_val)
-            
-            # Add single labels by plotting one line separately
-            plt.plot(x_data, y_original[:, 0], linestyle="None", marker="o", markersize=1,
-                    color="tab:blue", label="Original")
-            plt.plot(x_data, y_denoised[:, 0], color="tab:orange", linewidth=1, label="Denoised")
             
             # Add error bands for first time instance if available
             if y_error is not None and np.sum(y_error) > 0:
