@@ -70,7 +70,7 @@ def displace_time_instances_vertically(fig: plt.Figure, offset_increment: float 
     """
     ax = fig.axes[0]
     lines = ax.get_lines()
-    if labels is not None:
+    if labels is None:
         labels = [f'time {t_idx}' for t_idx in range(len(lines))]
         
     offset = 0
