@@ -261,8 +261,8 @@ class InputWarper:
         factors = factors / np.max(factors)
 
         return factors
-    
-    def visualize_warping(self, title: str = "Input Warping Results"):
+
+    def visualize_warping(self, title: str = "Input Warping Results", figsize: tuple = (8, 6)):
         """
         Visualize the warping transformation.
         
@@ -271,9 +271,9 @@ class InputWarper:
         """
         if not self.initialized:
             raise ValueError("Must call initialize() before visualizing")
-            
-        plt.figure(figsize=(6, 4))
-        
+
+        plt.figure(figsize=figsize)
+
         plt.plot(self.x_original, self.x_warped, 'o-', markersize=2)
         plt.xlabel('Original coordinates')
         plt.ylabel('Warped coordinates')

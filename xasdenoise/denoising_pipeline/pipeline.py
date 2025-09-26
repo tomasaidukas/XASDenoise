@@ -254,7 +254,7 @@ class DenoisingPipeline:
         
         return self.results['denoised'], self.results['error'], self.results['noise']
     
-    def plot_results(self, fig_size: Tuple[int, int] = (12, 5), title: Optional[str] = None, 
+    def plot_results(self, figsize: Tuple[int, int] = (8, 6), title: Optional[str] = None, 
                      full_range: bool = True, plot_kspace: bool = False, 
                      time_instance: Optional[int] = None, show_error: bool = True):
         """
@@ -312,7 +312,7 @@ class DenoisingPipeline:
             n_time_instances = 1
         
         # Create plots
-        plt.figure(figsize=fig_size)
+        plt.figure(figsize=figsize)
         if title:
             plt.suptitle(title)
         
@@ -354,7 +354,7 @@ class DenoisingPipeline:
                                y_denoised[:, 0] + y_error[:, 0]*2,
                                color="tab:orange", alpha=alpha_val*0.5, label=r"95% confidence interval")
         
-        plt.legend(loc='upper right')
+        # plt.legend(loc='upper right')
         plt.xlabel("Energy (eV)")
         plt.ylabel("Absorption")
         # plt.title("Energy Domain Comparison")

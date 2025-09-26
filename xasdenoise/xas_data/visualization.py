@@ -12,7 +12,7 @@ from typing import Optional
 from xasdenoise.xas_data.spectrum import Spectrum
 
 
-def setup_plot(title: str, xlabel: str = 'Energy (eV)', ylabel: str = 'Absorption') -> None:
+def setup_plot(title: str, figsize: tuple = (8, 6), xlabel: str = 'Energy (eV)', ylabel: str = 'Absorption') -> None:
     """
     Set up the plot with a title and axis labels.
 
@@ -21,7 +21,7 @@ def setup_plot(title: str, xlabel: str = 'Energy (eV)', ylabel: str = 'Absorptio
         xlabel (str): Label for the x-axis. Defaults to 'Energy (eV)'.
         ylabel (str): Label for the y-axis. Defaults to 'Absorption'.
     """
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=figsize)
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)

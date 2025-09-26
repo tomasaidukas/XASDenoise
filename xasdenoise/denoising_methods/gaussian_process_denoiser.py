@@ -1375,7 +1375,7 @@ class GPDenoiser:
 
         # Plot the results if verbose
         if self.verbose >= 1:
-            plt.figure()
+            plt.figure(figsize=(8, 6))
             plt.title('GP Denoising with Windows')
             plt.plot(self.x_train0, self.y_train0, label='Original')
             plt.plot(self.x_predict0, y_stitched, label='Denoised')
@@ -1499,7 +1499,7 @@ class GPDenoiser:
         self.restore_state(state)
         
         if self.verbose >= 1:
-            plt.figure()
+            plt.figure(figsize=(8, 6))
             plt.title('GP noise estimation')
             plt.plot(self.x_train0, self.noise_train0, label='Initial estimate')
             if self.filter_refined_noise_estimate:
@@ -1509,7 +1509,7 @@ class GPDenoiser:
             plt.legend()
             plt.show()
 
-            plt.figure()
+            plt.figure(figsize=(8, 6))
             plt.title('Data estimate (during GP noise estimation)')
             plt.plot(self.x_train0, self.y_train0, label='Initial estimate')
             plt.plot(self.x_train0, y_estimate, label='GP estimate')
@@ -1521,7 +1521,8 @@ class GPDenoiser:
         return noise_estimate
 
     # --------------------------- plotting ---------------------------
-    def plot_denoising_results(self, X_train, y_train, X, mean_prediction, std_prediction=None, y_ref=None, fig_size=(12, 8)):
+    def plot_denoising_results(self, X_train, y_train, X, mean_prediction, std_prediction=None, y_ref=None, 
+                               figsize: tuple = (8, 6)):
         """
         Plot the results of Gaussian Process denoising.
 
@@ -1535,7 +1536,7 @@ class GPDenoiser:
             fig_size (tuple): Size of the plot (default: (12, 8)).
         """
         
-        plt.figure(figsize=fig_size)
+        plt.figure(figsize=figsize)
 
         plt.subplot(3, 2, 1)
         lengthscale = self.lengthscale if self.num_kernels == 1 else self.lengthscale[0]

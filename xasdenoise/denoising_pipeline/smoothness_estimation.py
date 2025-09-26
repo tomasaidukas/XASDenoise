@@ -128,7 +128,8 @@ class SmoothnessEstimator:
         
         return smoothness[:, None]
     
-    def preprocess_for_smoothness(self, x: np.ndarray, y_avg: np.ndarray) -> np.ndarray:
+    def preprocess_for_smoothness(self, x: np.ndarray, y_avg: np.ndarray,
+                                  figsize: tuple = (8, 6)) -> np.ndarray:
         """Preprocess data for smoothness estimation."""
         
         if not self.config.get('smoothness_denoise', True):
@@ -141,7 +142,7 @@ class SmoothnessEstimator:
         y_denoised = uniform_filter1d(y_avg, win_points, axis=0)
         
         if self.verbose >= 2:
-            plt.figure()
+            plt.figure(figsize=figsize)
             plt.title("Smoothness: initial data denoising")
             plt.plot(x, y_avg[:, 0], label='initial')
             plt.plot(x, y_denoised[:, 0], label='denoised')
@@ -314,11 +315,12 @@ class SmoothnessEstimator:
         win = int(win)
         return win
         
-    def plot_smoothness_results(self, x: np.ndarray, smoothness: np.ndarray, title: str):
+    def plot_smoothness_results(self, x: np.ndarray, smoothness: np.ndarray, title: str,
+                                figsize: tuple = (16, 6)):
         """Plot smoothness estimation results."""
-        
-        plt.figure(figsize=(12, 4))
-        
+
+        plt.figure(figsize=figsize)
+
         plt.subplot(1, 2, 1)
         plt.plot(x, smoothness, label='Smoothness')
         plt.xlabel('Energy (eV)')

@@ -308,9 +308,10 @@ class DataPreprocessor:
         return win
     
     def _plot_baseline_results(self, x: np.ndarray, y: np.ndarray, 
-                              baseline: np.ndarray, y_processed: np.ndarray):
+                              baseline: np.ndarray, y_processed: np.ndarray, 
+                              figsize: tuple = (16, 6)):
         """Plot baseline estimation results."""
-        plt.figure(figsize=(12, 4))
+        plt.figure(figsize=figsize)
         
         plt.subplot(1, 2, 1)
         plt.plot(x, y[:, 0], '*', label='Original Signal', alpha=0.7)
@@ -330,9 +331,10 @@ class DataPreprocessor:
         plt.tight_layout()
         plt.show()
     
-    def _plot_noise_results(self, x: np.ndarray, noise: np.ndarray):
+    def _plot_noise_results(self, x: np.ndarray, noise: np.ndarray,
+                            figsize: tuple = (8, 6)):
         """Plot noise estimation results."""
-        plt.figure()
+        plt.figure(figsize=figsize)
         plt.plot(x, noise[:, 0], label='Estimated Noise (σ)')
         plt.xlabel('Energy (eV)')
         plt.ylabel('Noise Level')
