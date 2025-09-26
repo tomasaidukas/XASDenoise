@@ -406,24 +406,24 @@ class DenoisingPipeline:
             
             if plot_single:
                 plt.plot(k_data, ky_original[:, 0], linestyle="None", marker="o", markersize=1,
-                        color="tab:blue", alpha=0.3, label="Original")
-                plt.plot(k_data, ky_denoised[:, 0], label='Denoised', color="tab:orange", linewidth=1.5)
+                        color="tab:blue", alpha=0.3)#, label="Original")
+                plt.plot(k_data, ky_denoised[:, 0], color="tab:orange", linewidth=1.5)#, label='Denoised')
                 
                 if ky_error is not None and np.sum(ky_error) > 0:
                     plt.fill_between(k_data, ky_denoised[:, 0] - ky_error[:, 0]*2,
                                    ky_denoised[:, 0] + ky_error[:, 0]*2,
-                                   color="tab:orange", alpha=0.3, label=r"95% confidence interval")
+                                   color="tab:orange", alpha=0.3)#, label=r"95% confidence interval")
             else:
                 alpha_val = max(0.1, 0.5 / n_time_instances)
                 plt.plot(k_data, ky_original, linestyle="None", marker="o", markersize=1,
-                        color="tab:blue", alpha=alpha_val, label="Original")
+                        color="tab:blue", alpha=alpha_val)#, label="Original")
                 plt.plot(k_data, ky_denoised, color="tab:orange", linewidth=1,
-                        alpha=alpha_val, label="Denoised")
+                        alpha=alpha_val)#, label="Denoised")
                 
                 if ky_error is not None and np.sum(ky_error) > 0:
                     plt.fill_between(k_data, ky_denoised[:, 0] - ky_error[:, 0]*2,
                                    ky_denoised[:, 0] + ky_error[:, 0]*2,
-                                   color="tab:orange", alpha=alpha_val*0.5, label=r"95% confidence interval")
+                                   color="tab:orange", alpha=alpha_val*0.5)#, label=r"95% confidence interval")
             
             # plt.legend(loc='upper right')
             plt.xlabel("Wavenumber (k)")
