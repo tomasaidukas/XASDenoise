@@ -59,7 +59,8 @@ def finalize_plot(yax_lim: Optional[tuple] = None,
         plt.show()
 
 
-def displace_time_instances_vertically(fig: plt.Figure, offset_increment: float = 0.5) -> None:
+def displace_time_instances_vertically(fig: plt.Figure, offset_increment: float = 0.5, 
+                                       labels: Optional[str] = None) -> None:
     """
     Displace time instances vertically in an existing figure and add labels at the start of each time instance.
 
@@ -69,14 +70,16 @@ def displace_time_instances_vertically(fig: plt.Figure, offset_increment: float 
     """
     ax = fig.axes[0]
     lines = ax.get_lines()
-
+    if labels is not None:
+        labels = [f'time {t_idx}' for t_idx in range(len(lines))]
+        
     offset = 0
     # adjust the lines upwards
     for t_idx, line in enumerate(lines):
         try:
             y_data = line.get_ydata()
             line.set_ydata(y_data + offset)
-            label = f'time {t_idx}'
+            label = labels[t_idx]
             ax.text(line.get_xdata()[0], y_data[0] + offset, label, fontsize='small', verticalalignment='bottom')
             offset += offset_increment
             
@@ -405,16 +408,22 @@ def plot_spectrum_time_instances(
         vertical_displacement_offset = data.spectrum[:, 0].mean()
 
     if time_instance_number is not None:
+        if time_instance_number > data.spectrum.shape[1]:
+            time_instance_number = data.spectrum.shape[1]
         time_indices = np.linspace(0, data.spectrum.shape[1]-1, time_instance_number).astype(int)
+        labels = [f'time {t_idx}' for t_idx in time_indices]
     else: 
         time_indices = None
+        labels = None  
         
     if time_binning_size is not None:
         data = data.copy()
         data.bin_time_instances(time_binning_size)
                 
     spectrum_plot(data.energy, data.spectrum, label, crop, time_indices)
-    finalize_plot(displace_time_vertically=True, vertical_displacement_offset=vertical_displacement_offset)
+    
+    fig = plt.gcf()
+    displace_time_instances_vertically(fig, vertical_displacement_offset, labels)
 
 
 def plot_time_evolution_3d(
