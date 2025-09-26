@@ -254,7 +254,7 @@ class DenoisingPipeline:
         
         return self.results['denoised'], self.results['error'], self.results['noise']
     
-    def plot_results(self, figsize: Tuple[int, int] = (8, 12), title: Optional[str] = None, 
+    def plot_results(self, figsize = None, title: Optional[str] = None, 
                      full_range: bool = True, plot_kspace: bool = False, 
                      time_instance: Optional[int] = None, show_error: bool = True):
         """
@@ -312,6 +312,10 @@ class DenoisingPipeline:
             n_time_instances = 1
         
         # Create plots
+        if figsize is None and plot_kspace:
+            figsize = (8, 12)
+        elif figsize is None:
+            figsize = (8, 6)
         plt.figure(figsize=figsize)
         if title:
             plt.suptitle(title)
