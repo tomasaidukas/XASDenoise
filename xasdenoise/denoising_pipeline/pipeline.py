@@ -354,7 +354,7 @@ class DenoisingPipeline:
                                y_denoised[:, 0] + y_error[:, 0]*2,
                                color="tab:orange", alpha=alpha_val*0.5, label=r"95% confidence interval")
         
-        # plt.legend(loc='upper right')
+        plt.legend(loc='upper right')
         plt.xlabel("Energy (eV)")
         plt.ylabel("Absorption")
         # plt.title("Energy Domain Comparison")
@@ -425,7 +425,7 @@ class DenoisingPipeline:
                                    ky_denoised[:, 0] + ky_error[:, 0]*2,
                                    color="tab:orange", alpha=alpha_val*0.5, label=r"95% confidence interval")
             
-            plt.legend(loc='upper right')
+            # plt.legend(loc='upper right')
             plt.xlabel("Wavenumber (k)")
             plt.ylabel("k²-weighted absorption")
             # plt.title("K-space Comparison")
