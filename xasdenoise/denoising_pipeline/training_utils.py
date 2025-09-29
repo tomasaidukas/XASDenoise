@@ -5,6 +5,8 @@ Prepare training data for the encoder model.
 import numpy as np
 from xasdenoise.denoising_pipeline import PipelineConfig, DenoisingPipeline
 from xasdenoise.denoising_methods.denoisers import EncoderDenoiser
+from sklearn.model_selection import train_test_split
+import tqdm
 
 def process_training_data(spectrum_obj, config=None, denoiser=None):
     """
@@ -46,7 +48,11 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None):
     """
     
     processed_data = process_training_data(spectrum_obj, config, denoiser)
-
+    # processed_data = {}
+    # processed_data['y'] = spectrum_obj.spectrum
+    # processed_data['x'] = spectrum_obj.energy
+    # processed_data['data_mask'] = spectrum_obj.data_mask if hasattr(spectrum_obj, 'data_mask') else None
+    
     # In noise2noise, target is the neighboring time point
     y_train = processed_data.get('y')
     y_target = processed_data.get('y')
@@ -118,7 +124,8 @@ def prepare_training_data(spectrum_obj_list, config=None, denoiser=None, method=
     if not isinstance(spectrum_obj_list, list):
         spectrum_obj_list = [spectrum_obj_list]
 
-    for idx, spectrum_obj in enumerate(spectrum_obj_list):
+    tqdm_iterator = tqdm.tqdm(spectrum_obj_list, desc="Processing spectra for training data")
+    for idx, spectrum_obj in enumerate(tqdm_iterator):
         if method == 'noise2noise':
             processed_data = create_noise2noise_data(spectrum_obj, config, denoiser)
         elif method == 'noise2clean':
@@ -297,109 +304,105 @@ def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, m
 #            x_val, y_val, y_val_target, mask_val, compound_val, element_val, \
 #            x_test, y_test, y_test_target, mask_test, compound_test, element_test
            
-# def split_by_compounds(compounds, compounds_for_test=[], compounds_to_exclude=[], train_frac=0.9, val_frac=0.05, test_frac=0.05, random_state=42):
-#     """
-#     Split data into train, validation, and test sets by compounds.
+def split_by_compounds(compounds, compounds_for_test=[], compounds_to_exclude=[], train_frac=0.9, val_frac=0.05, test_frac=0.05, random_state=42):
+    """
+    Split data into train, validation, and test sets by compounds.
     
-#     Args:
-#         y_train (torch.Tensor): Training data (e.g., noisy spectra).
-#         y_targets (torch.Tensor): Target data (e.g., clean spectra).
-#         compounds (list): List of compound names corresponding to each sample.
-#         compounds_for_test (list): List of explicit compounds to use for testing.
-#         compounds_to_exclude (list): List of compounds to exclude from the training set.
-#         train_frac (float): Fraction of compounds to use for training.
-#         val_frac (float): Fraction of compounds to use for validation.
-#         test_frac (float): Fraction of compounds to use for testing.
-#         random_state (int): Random seed for reproducibility.
+    Args:
+        y_train (torch.Tensor): Training data (e.g., noisy spectra).
+        y_targets (torch.Tensor): Target data (e.g., clean spectra).
+        compounds (list): List of compound names corresponding to each sample.
+        compounds_for_test (list): List of explicit compounds to use for testing.
+        compounds_to_exclude (list): List of compounds to exclude from the training set.
+        train_frac (float): Fraction of compounds to use for training.
+        val_frac (float): Fraction of compounds to use for validation.
+        test_frac (float): Fraction of compounds to use for testing.
+        random_state (int): Random seed for reproducibility.
         
-#     Returns:
-#         tuple: (train_indices, val_indices, test_indices)
-#     """
-#     # Get unique compounds
-#     unique_compounds = np.unique(compounds)
+    Returns:
+        tuple: (train_indices, val_indices, test_indices)
+    """
+    # Get unique compounds
+    unique_compounds = np.unique(compounds)
     
-#     # If test compounds are provided, create the test compound list
-#     # and adjust the split ratios to avoid creating too many or too little
-#     # entries in one list or another
-#     if len(compounds_for_test) > 0:
-#         N = len(compounds_for_test)
-#         N_train = len(unique_compounds) * train_frac
-#         N_val = len(unique_compounds) * val_frac
-#         N_test = len(unique_compounds) * test_frac - N
+    # If test compounds are provided, create the test compound list
+    # and adjust the split ratios to avoid creating too many or too little
+    # entries in one list or another
+    if len(compounds_for_test) > 0:
+        N = len(compounds_for_test)
+        N_train = len(unique_compounds) * train_frac
+        N_val = len(unique_compounds) * val_frac
+        N_test = len(unique_compounds) * test_frac - N
         
-#         print(f"Initial split ratios: train={train_frac}, val={val_frac}, test={test_frac}")
-#         test_frac = int(np.maximum(N_test / (N_train + N_val + N_test), 0))
-#         train_frac = int(np.minimum(N_train / (N_train + N_val + N_test), 1))
-#         val_frac = int(np.maximum(N_val / (N_train + N_val + N_test), 0))
-#         print(f"Adjusted split ratios: train={train_frac}, val={val_frac}, test={test_frac}")
+        if N_test < 0:
+            print(f"Warning: Too many compounds are explicitly included into the test set.")
+            print(f"Adjusting the split ratios to avoid negative number of test compounds.")
+            N_train = N_train + abs(N_test)
+            N_test = 0
+        
+        print(f"Initial split ratios: train={train_frac}, val={val_frac}, test={test_frac}")
+        test_frac = float(np.maximum(N_test / (N_train + N_val + N_test), 0))
+        train_frac = float(np.minimum(N_train / (N_train + N_val + N_test), 1))
+        val_frac = float(np.maximum(N_val / (N_train + N_val + N_test), 0))
+        print(f"Adjusted split ratios: train={train_frac}, val={val_frac}, test={test_frac}")
     
-#     # Split compounds into train/val/test
-#     if val_frac == 0 or val_frac is None:
-#         train_compounds, test_compounds = train_test_split(
-#             unique_compounds, train_size=train_frac, random_state=random_state
-#         )
-#         val_compounds = []
-#     else:
-#         train_compounds, temp_compounds = train_test_split(
-#             unique_compounds, train_size=train_frac, random_state=random_state
-#         )
-#         val_compounds, test_compounds = train_test_split(
-#             temp_compounds, test_size=(test_frac / (val_frac + test_frac)), random_state=random_state
-#         )
+    # Split compounds into train/val/test
+    if train_frac == 1.0:
+        train_compounds = unique_compounds
+        val_compounds = []
+        test_compounds = []
+    elif val_frac == 0 or val_frac is None:
+        train_compounds, test_compounds = train_test_split(
+            unique_compounds, train_size=train_frac, random_state=random_state
+        )
+        val_compounds = []
+    else:
+        train_compounds, temp_compounds = train_test_split(
+            unique_compounds, train_size=train_frac, random_state=random_state
+        )
+        val_compounds, test_compounds = train_test_split(
+            temp_compounds, test_size=(test_frac / (val_frac + test_frac)), random_state=random_state
+        )
     
-#     # if test compounds are provided, include them into the test set
-#     if compounds_for_test is not None and len(compounds_for_test) > 0:
-#         print(f"Compounds explicitly included into the test set:")
-#         print(list(compounds_for_test))
-#         for c in compounds_for_test:
-#             if c in train_compounds:
-#                 test_compounds = np.append(test_compounds, c)
-#                 train_compounds = np.delete(train_compounds, np.where(train_compounds == c))
-#             if c in val_compounds:
-#                 test_compounds = np.append(test_compounds, c)
-#                 val_compounds = np.delete(val_compounds, np.where(val_compounds == c))
+    # if test compounds are provided, include them into the test set
+    if compounds_for_test is not None and len(compounds_for_test) > 0:
+        print(f"Compounds explicitly included into the test set:")
+        print(list(compounds_for_test))
+        for c in compounds_for_test:
+            if c in train_compounds:
+                test_compounds = np.append(test_compounds, c)
+                train_compounds = np.delete(train_compounds, np.where(train_compounds == c))
+            if c in val_compounds:
+                test_compounds = np.append(test_compounds, c)
+                val_compounds = np.delete(val_compounds, np.where(val_compounds == c))
 
-#     # exclude compounds from the splits
-#     print(f"Compounds explicitly excluded from the splits:")
-#     print(list(compounds_to_exclude))
-#     for c in compounds_to_exclude:
-#         if c in train_compounds:
-#             train_compounds = np.delete(train_compounds, np.where(train_compounds == c))
-#         if c in val_compounds:
-#             val_compounds = np.delete(val_compounds, np.where(val_compounds == c))
-#         if c in test_compounds:
-#             test_compounds = np.delete(test_compounds, np.where(test_compounds == c))
+    # exclude compounds from the splits
+    print(f"Compounds explicitly excluded from the splits:")
+    print(list(compounds_to_exclude))
+    for c in compounds_to_exclude:
+        if c in train_compounds:
+            train_compounds = np.delete(train_compounds, np.where(train_compounds == c))
+        if c in val_compounds:
+            val_compounds = np.delete(val_compounds, np.where(val_compounds == c))
+        if c in test_compounds:
+            test_compounds = np.delete(test_compounds, np.where(test_compounds == c))
     
-#     # Get indices for each split
-#     train_indices = [i for i, c in enumerate(compounds) if c in train_compounds]
-#     val_indices = [i for i, c in enumerate(compounds) if c in val_compounds]
-#     test_indices = [i for i, c in enumerate(compounds) if c in test_compounds]
+    # Get indices for each split
+    train_indices = [i for i, c in enumerate(compounds) if c in train_compounds]
+    val_indices = [i for i, c in enumerate(compounds) if c in val_compounds]
+    test_indices = [i for i, c in enumerate(compounds) if c in test_compounds]
     
-#     # Convert indices into numpy arrays
-#     train_indices = np.array(train_indices)
-#     val_indices = np.array(val_indices)
-#     test_indices = np.array(test_indices)
+    # Convert indices into numpy arrays
+    train_indices = np.array(train_indices)
+    val_indices = np.array(val_indices)
+    test_indices = np.array(test_indices)
     
-#     # For testing take just one time instance for each compound
-#     test_indices = np.unique(np.array([np.where(np.array(compounds) == c)[0][0] for c in test_compounds]))
+    # For testing take just one time instance for each compound
+    test_indices = np.unique(np.array([np.where(np.array(compounds) == c)[0][0] for c in test_compounds]))
     
-#     print(f"Number of unique compounds: {len(unique_compounds)}")
-#     print(f"Training compounds: {len(train_compounds)}")
-#     print(f"Validation compounds: {len(val_compounds)}")
-#     print(f"Test compounds: {len(test_compounds)}")
+    print(f"Number of unique compounds: {len(unique_compounds)}")
+    print(f"Training compounds: {len(train_compounds)}")
+    print(f"Validation compounds: {len(val_compounds)}")
+    print(f"Test compounds: {len(test_compounds)}")
     
-#     return train_indices, val_indices, test_indices
-
-# def unify_time_axis(spectrum_list_train, spectrum_list_target):
-#     """
-#     If the "training" spectra contain many noisy time instances and the 
-#     "target" spectrum time instances were time-averaged, we want to pair 
-#     "training" and "target" time instances which is done by repeating the 
-#     averaged time instances.
-    
-#     Args:
-#         spectrum_list_train (list): List of training Spectrum objects
-#         spectrum_list_target (list): List of target Spectrum objects
-#     """
-#     for train, target in zip(spectrum_list_train, spectrum_list_target):
-#         target.spectrum = np.repeat(target.spectrum, train.spectrum.shape[1], axis=1)
+    return train_indices, val_indices, test_indices

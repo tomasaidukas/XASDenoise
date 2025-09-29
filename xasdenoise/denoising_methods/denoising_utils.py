@@ -209,7 +209,7 @@ def inducing_indices(smoothness, num_samples, base):
 
     return sampled_indices
 
-def estimate_noise(x, y):
+def estimate_noise(x, y, polyfit_degree=1):
     """
     Estimate the standard deviation of residuals from a linear regression fit.
 
@@ -222,8 +222,12 @@ def estimate_noise(x, y):
     """
 
     # fit a line on the noise region
-    coef = np.polyfit(x, y, deg=1)
-    model = coef[0]*x[:,None] + coef[1]
+    coef = np.polyfit(x, y, deg=polyfit_degree)
+    
+    # model = coef[0]*x[:,None] + coef[1]
+    model = np.zeros_like(y)
+    for idx in range(len(coef)):
+        model += coef[idx]*x[:,None]**(polyfit_degree - idx)
     
     # deviation between the data and the linear model
     if y.ndim > 1:
@@ -232,7 +236,7 @@ def estimate_noise(x, y):
         std = np.std(y - model)
     return std
 
-def estimate_noise_std_sliding_window(x, y, window=21):
+def estimate_noise_std_sliding_window(x, y, window=21, polyfit_degree=1):
     """
     Estimate noise standard deviation using a sliding window approach.
 
@@ -257,7 +261,7 @@ def estimate_noise_std_sliding_window(x, y, window=21):
         y_windows = sliding_window_view(y[:,t], window, axis=0).T
         x_windows = np.arange(window)
         
-        std_windows = estimate_noise(x_windows, y_windows)
+        std_windows = estimate_noise(x_windows, y_windows, polyfit_degree)
             
         pad = y.shape[0] - std_windows.shape[0]
         std_windows = np.pad(std_windows, (pad // 2, pad // 2), constant_values=(std_windows[0], std_windows[-1]))

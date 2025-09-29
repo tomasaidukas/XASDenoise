@@ -29,7 +29,8 @@ class EncoderDenoiser:
     
     Note: Requires PyTorch. If not available, raises ImportError on initialization.
     """
-    def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, channels=None, dropout_rate=0):
+    def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, 
+                 channels=None, dropout_rate=0, normalization_method='l2norm'):
         """
         Initialize the EncoderDenoiser with a specified autoencoder architecture.
 
@@ -57,6 +58,7 @@ class EncoderDenoiser:
         self.channels = channels
         self.dropout_rate = dropout_rate
         self.gpu_index = gpu_index
+        self.normalization_method = normalization_method
         
         # Initialize device - auto-detect if 'auto' is specified
         if device == 'auto':
@@ -201,41 +203,71 @@ class EncoderDenoiser:
         else:
             return None
         
-    def normalize_data(self, y, compute_norm=True):
+    def normalize_data(self, y, compute_norm=True, method='l2norm'):
         """
-        Normalize the training data to the range [-1, 1].
+        Normalize the training data.
 
         Args:
             y (torch.Tensor): Training data.
             compute_norm (bool): Whether to compute normalization parameters. Defaults to True.
+            method (str): Normalization method. Options: 'minmax', 'l2norm', 'zscore'. Defaults to 'l2norm'.
 
         Returns:
             torch.Tensor: Normalized training data.
         """
-        if compute_norm:
-            y_max = y.max(axis=1).values[:, None]
-            y_min = y.min(axis=1).values[:, None]
-            self.norm_params['y'] = (y_min, y_max)
-        y_min, y_max = self.norm_params['y']
-        return 2 * (y - y_min) / (y_max - y_min) - 1
+        if method == 'minmax':
+            if compute_norm:
+                y_max = y.max(axis=1).values[:, None]
+                y_min = y.min(axis=1).values[:, None]
+                self.norm_params['y'] = (y_min, y_max)
+            y_min, y_max = self.norm_params['y']
+            return 2 * (y - y_min) / (y_max - y_min) - 1
+        
+        elif method == 'l2norm':
+            if compute_norm:
+                y_norm = torch.norm(y, p=2, dim=1, keepdim=True)
+                self.norm_params['y'] = y_norm
+            y_norm = self.norm_params['y']
+            return y / (y_norm + 1e-8)  # Avoid division by zero
+        
+        elif method == 'zscore':
+            if compute_norm:
+                y_mean = y.mean(axis=1, keepdim=True)
+                y_std = y.std(axis=1, keepdim=True)
+                self.norm_params['y'] = (y_mean, y_std)
+            y_mean, y_std = self.norm_params['y']
+            return (y - y_mean) / (y_std + 1e-8)  # Avoid division by zero
+        
+        else:
+            raise ValueError(f"Unknown normalization method: {method}. Supported: 'minmax', 'l2norm', 'zscore'.")
     
-    def denormalize_data(self, y):
+    def denormalize_data(self, y, method='l2norm'):
         """
         Denormalize the denoised data using the stored normalization parameters.
 
         Args:
             y (torch.Tensor): Denoised data.
+            method (str): Normalization method used during training. Options: 'minmax', 'l2norm', 'zscore'. Defaults to 'l2norm'.
 
         Returns:
             torch.Tensor: Denormalized denoised data.
         """
-        y_min, y_max = self.norm_params['y']
-        return (y + 1) * (y_max - y_min) / 2 + y_min
+        if method == 'minmax':
+            y_min, y_max = self.norm_params['y']
+            return (y + 1) * (y_max - y_min) / 2 + y_min
+        elif method == 'l2norm':
+            y_norm = self.norm_params['y']
+            return y * (y_norm + 1e-8)  # Avoid division by zero
+        elif method == 'zscore':
+            y_mean, y_std = self.norm_params['y']
+            return y * (y_std + 1e-8) + y_mean  # Avoid division by zero
+        else:
+            raise ValueError(f"Unknown normalization method: {method}. Supported: 'minmax', 'l2norm', 'zscore'.")
     
     def train_model(self, y_train, y_target, mask_train=None, y_val=None, y_val_target=None, mask_val=None,
             batch_size=32, num_epochs=1000, learning_rate=1e-4, save_path=None, augment_data=False, noise2noise=False,
-            remove_padded_regions=True, randomized_masking=False, kweighted_loss=False, loss_weights=None,
-            early_stopping_patience=50, dropout_rate=0.1, weight_decay=1e-5):
+            remove_padded_regions=True, randomized_masking=False, loss_weights=None,
+            early_stopping_patience=50, weight_decay=1e-5):
         """
         Train the encoder model using the given training data with optional masking.
 
@@ -250,8 +282,12 @@ class EncoderDenoiser:
             num_epochs (int): Number of epochs for training. Defaults to 1000.
             learning_rate (float): Learning rate for the optimizer. Defaults to 1e-4.
             save_path (str, optional): Path to save the trained model. Defaults to None.
+            augment_data (bool): Whether to apply data augmentation. Defaults to False.
+            noise2noise (bool): Whether to use noise2noise augmentation. Defaults to False.
+            remove_padded_regions (bool): Whether to remove padded regions using the mask. Defaults to True.
+            randomized_masking (bool): Whether to randomly mask data during training. Defaults to False.
+            loss_weights (torch.Tensor, optional): Weights for each data point in the loss function. Defaults to None.
             early_stopping_patience (int): Number of epochs to wait for improvement before stopping. Defaults to 50.
-            dropout_rate (float): Dropout rate for regularization. Defaults to 0.1.
             weight_decay (float): L2 regularization strength. Defaults to 1e-5.
         """
         # Convert to tensors and initialize arrays
@@ -266,11 +302,11 @@ class EncoderDenoiser:
             
         # Normalize data
         if y_val is not None:
-            y_val = self.normalize_data(y_val)
-            y_val_target = self.normalize_data(y_val_target, compute_norm=False)
-            
-        y_train = self.normalize_data(y_train)
-        y_target = self.normalize_data(y_target, compute_norm=False)
+            y_val = self.normalize_data(y_val, method=self.normalization_method)
+            y_val_target = self.normalize_data(y_val_target, compute_norm=False, method=self.normalization_method)
+
+        y_train = self.normalize_data(y_train, method=self.normalization_method)
+        y_target = self.normalize_data(y_target, compute_norm=False, method=self.normalization_method)
 
         # Prepare datasets
         train_dataset = TensorDataset(y_train, y_target, mask_train) if mask_train is not None else TensorDataset(y_train, y_target)
@@ -634,9 +670,9 @@ class EncoderDenoiser:
         self.encoder_model.eval()
         with torch.no_grad():
             # y_denoised = self.encoder_model(x, y)  
-            y = self.normalize_data(y)          
+            y = self.normalize_data(y, method=self.normalization_method)          
             y_denoised = self.encoder_model(y)
-            y_denoised = self.denormalize_data(y_denoised)        
+            y_denoised = self.denormalize_data(y_denoised, method=self.normalization_method)        
             
             # swap back to time and x axes
             y_denoised = y_denoised.transpose(1, 0)

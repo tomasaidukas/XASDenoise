@@ -121,6 +121,14 @@ class XASDatabase:
         }
         self.processing_history.append(step)
 
+    def get_subset(self, indices: List[int]) -> "XASDatabase":
+        """Get a subset of the database by indices."""
+        subset_db = XASDatabase()
+        subset_db.spectra = [self.spectra[i].copy() for i in indices]
+        subset_db.database_metadata = [self.database_metadata[i] for i in indices]
+        subset_db.processing_history = self.processing_history.copy()
+        return subset_db
+    
     # ========================================================================
     # METADATA OPERATIONS
     # ========================================================================

@@ -28,6 +28,7 @@ class PipelineConfig:
     noise_crop_region: np.ndarray = field(default_factory=lambda: np.arange(0, 100))  # eV
     noise_window: float = 3  # eV
     noise_estimation_smoothing: bool = True
+    noise_polyfit_degree: int = 1  # Degree of polynomial for noise estimation within each sliding window
     
     # Data scaling settings
     apply_data_mask: Union[str, bool] = False

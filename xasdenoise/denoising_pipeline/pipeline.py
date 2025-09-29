@@ -174,7 +174,7 @@ class DenoisingPipeline:
                 print(f'Data preprocessing failed: {str(e)}')
             raise
         
-        return preprocessed_data    
+        return warped_data    
             
     def _run_preprocessing(self) -> Dict[str, Any]:
         """Run the preprocessing step."""

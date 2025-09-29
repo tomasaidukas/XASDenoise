@@ -244,6 +244,10 @@ class DataPreprocessor:
             print('Estimating noise level')
         
         mode = self.config.get('noise_estimation_mode', 1)
+        polyfit_degree = self.config.get('noise_polyfit_degree', 1)
+        
+        if mode is None:
+            return np.zeros_like(y)
         
         if mode == 0:
             # Constant noise from specific region
@@ -259,7 +263,7 @@ class DataPreprocessor:
             values_in_ev = self.config.get('values_in_ev', True)
             win_points = self._ev_to_points(x, noise_window, values_in_ev)
                 
-            noise_estimate = denoising_utils.estimate_noise_std_sliding_window(x, y, win_points)
+            noise_estimate = denoising_utils.estimate_noise_std_sliding_window(x, y, win_points, polyfit_degree)
             
             # Apply smoothing if requested
             if self.config.get('noise_estimation_smoothing', True):
