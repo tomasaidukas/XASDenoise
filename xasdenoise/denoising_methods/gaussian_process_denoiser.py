@@ -1042,8 +1042,8 @@ class GPDenoiser:
         state0 = self._get_current_state()
         
         # If data is small, don't use GPU
-        if window_size < 500:
-            self.use_gpu = False
+        # if window_size < 500:
+        #     self.use_gpu = False
         
         # Initialize the training data tensors
         self.initialize_training_data(self.x_train0, self.y_train0, self.noise_train0, 

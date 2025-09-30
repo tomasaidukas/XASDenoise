@@ -46,26 +46,6 @@ def estimate_smooth_baseline(x, y, glitch_mask=None, lam=1e3):
     baseline, params = baseline_fitter.iasls(y, weights=glitch_mask, lam=lam, p=0.01)
     return baseline
 
-
-def find_rising_edge_midpoint(spectrum):
-    """
-    Find rising edge mid-point.
-    
-    Args:
-        spectrum (object): Spectrum object.
-        
-    Returns:
-        float: Estimated edge energy.
-    """
-    # use the mid-point of the rising absorptin edge. Easiest to use the precomputed background
-    x = spectrum.energy
-    background = spectrum.background
-    if background is None:
-        background = spectrum.compute_background()
-    midpoint = x[np.argmin(np.abs(background - (background.max() - background.min())/2))]
-    return midpoint
-
-
 def fit_edge_step_not_normalized(x, y, edge, pre_edge_idx, post_edge_idx, 
                            fitting_funcs=['V','V'], downsample=0, beta=10,
                            robust_metric='mad'):
@@ -167,7 +147,7 @@ def fit_edge_step_not_normalized(x, y, edge, pre_edge_idx, post_edge_idx,
     background = best_background
     return background
 
-def fit_edge_step(x, y, edge_guess=None,  
+def fit_edge_step(x, y, edge_guess=None, step_function='asymmetric_tanh', 
                   robust_fit=True, max_iter=100):
     """
     Fit a smooth step-like baseline function directly to a normalized XAS spectrum.
@@ -179,6 +159,8 @@ def fit_edge_step(x, y, edge_guess=None,
         x (np.ndarray): Energy array
         y (np.ndarray): Normalized spectrum array
         edge_guess (float, optional): Initial guess for edge position. If None, uses midpoint.
+        step_function (str): Type of step function to use:
+            - 'asymmetric_tanh': Asymmetric tanh transitions
         robust_fit (bool): Use robust fitting to handle outliers
         max_iter (int): Maximum iterations for fitting
         
@@ -187,9 +169,37 @@ def fit_edge_step(x, y, edge_guess=None,
                and fit_params contains the fitted parameters
     """
     
-    def tanh_step(x, x0, width):
-        """Hyperbolic tangent transition function"""
-        return 1 * 0.5 * (1 + np.tanh((x - x0) / width))
+    def asymmetric_step(x, x0, width_left, width_right):
+        """
+        Asymmetric step function that allows different transition rates 
+        on the left (pre-edge) and right (post-edge) sides of the edge.
+        
+        Args:
+            x: Energy array
+            x0: Edge position
+            width_left: Transition width for pre-edge (left side)
+            width_right: Transition width for post-edge (right side)
+        
+        Returns:
+            Step function with asymmetric transitions
+        """
+        # Create smooth transitions on both sides
+        left_mask = x <= x0
+        right_mask = x > x0
+        
+        result = np.zeros_like(x)
+        
+        # Left side (pre-edge): transition from 0 to 0.5
+        if np.any(left_mask):
+            left_tanh = 0.5 * (1 + np.tanh((x[left_mask] - x0) / width_left))
+            result[left_mask] = left_tanh
+        
+        # Right side (post-edge): transition from 0.5 to 1
+        if np.any(right_mask):
+            right_tanh = 0.5 + 0.5 * np.tanh((x[right_mask] - x0) / width_right)
+            result[right_mask] = right_tanh
+            
+        return result
     
     def huber_loss(residuals, delta=1.0):
         """Huber loss function"""
@@ -198,9 +208,15 @@ def fit_edge_step(x, y, edge_guess=None,
                         0.5 * residuals**2,
                         delta * (abs_res - 0.5 * delta))
             
+    # Select step function based on user choice
+    if step_function == 'asymmetric_tanh':
+        step_func = asymmetric_step
+    else:
+        raise ValueError(f"Unknown step function: {step_function}. Use 'asymmetric_tanh'")
+    
     def loss_function(params):
         """Loss function for robust fitting"""
-        res = tanh_step(x, *params) - y
+        res = step_func(x, *params) - y
         return huber_loss(res, delta=np.std(res))
     
     # Initial parameter guess
@@ -212,12 +228,13 @@ def fit_edge_step(x, y, edge_guess=None,
     
     width_guess = (x.max() - x.min()) * 0.05  # 5% of energy range
     
-    initial_params = [edge_guess, width_guess]#, y_min, y_max]
+    # Initial parameters: [edge_position, width_left, width_right]
+    initial_params = [edge_guess, width_guess, width_guess]
     
     # Parameter bounds
     bounds = (
-        [x.min(), 0], # Lower bounds
-        [x.max(), np.inf]# Upper bounds
+        [x.min(), 0, 0], # Lower bounds: [min_edge, min_width_left, min_width_right]
+        [x.max(), np.inf, np.inf]# Upper bounds
     )
     
     if robust_fit:        
@@ -231,7 +248,7 @@ def fit_edge_step(x, y, edge_guess=None,
     else:
         # Standard least squares fitting
         try:
-            fit_params, _ = curve_fit(tanh_step, x, y, p0=initial_params, 
+            fit_params, _ = curve_fit(step_func, x, y, p0=initial_params, 
                                     bounds=bounds, maxfev=max_iter)
             success = True
         except:
@@ -243,5 +260,5 @@ def fit_edge_step(x, y, edge_guess=None,
         fit_params = initial_params
     
     # Generate baseline
-    baseline = tanh_step(x, *fit_params)
+    baseline = step_func(x, *fit_params)
     return baseline

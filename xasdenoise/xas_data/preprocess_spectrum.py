@@ -112,8 +112,28 @@ def center_edge(data):
     Returns:
         None
     """
-    new_edge = baseline_estimation.find_rising_edge_midpoint(data)
+
+    # Find the rising edge midpoint from the XAS background
+    if data.background is None:
+        data.compute_background()
+        
+    # Find the midpoint of the background
+    background_avg = np.mean(data.background, axis=1)
+    midpoint_value = (background_avg.max() + background_avg.min()) / 2
+    edge_idx = np.argmin(np.abs(background_avg - midpoint_value))
+    new_edge = data.energy[edge_idx]
     data.metadata["edge"] = new_edge
+    
+    # plt.figure()
+    # plt.plot(data.energy, background_avg)
+    # plt.plot(data.energy, data.spectrum.mean(axis=1))
+    # plt.axvline(data.edge, color='r', linestyle='--', label='old edge')
+    # plt.axvline(new_edge, color='g', linestyle='--', label='new edge')
+    # plt.title(f"Edge centering: old edge = {data.edge:.2f} eV, new edge = {new_edge:.2f} eV")
+    # plt.xlabel('Energy (eV)')
+    # plt.legend()
+    # plt.show()
+    # asdasdas
 
 def find_glitches(data, threshold=95, glitch_matching=True, split_data=False, glitch_refinement_fit=False, 
                   glitch_fit_window=None, glitch_width_scaling=1, group_glitches=False, plot=False, 
@@ -340,14 +360,24 @@ def estimate_background(data):
     Returns:
         np.ndarray: Estimated background for the spectrum.
     """
+    from xasdenoise.utils import baseline_estimation
+
     x_fit = data.energy + 1e-3
     y_fit = data.time_averaged_spectrum
-    edge = data.edge # instead of the tabulated edge position
-    pre_edge_idx = data.pre_edge_region_indices
-    post_edge_idx = data.post_edge_region_indices
+    edge = data.edge
     
-    from xasdenoise.utils import baseline_estimation
-    background = baseline_estimation.fit_edge_step_not_normalized(x_fit, y_fit, edge, pre_edge_idx, post_edge_idx)
+    # pre_edge_idx = data.pre_edge_region_indices
+    # post_edge_idx = data.post_edge_region_indices
+    # pre_edge_fit_func = data.metadata.get('pre_edge_fit_func', 'CS')
+    # post_edge_fit_func = data.metadata.get('post_edge_fit_func', 'CS')
+    # fitting_funcs = [pre_edge_fit_func, post_edge_fit_func]
+
+    # background = baseline_estimation.fit_edge_step_not_normalized(x_fit, y_fit, edge, 
+    #                                                               pre_edge_idx, post_edge_idx, 
+    #                                                               fitting_funcs)
+    
+    # TODO: here it is assumed that the spectrum is normalized
+    background = baseline_estimation.fit_edge_step(x_fit, y_fit, edge, robust_fit=False)
     data.background = background
     
     return background

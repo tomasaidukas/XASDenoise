@@ -190,6 +190,8 @@ class Spectrum:
         """
         from xasdenoise.xas_data.preprocess_spectrum import estimate_background
         self.background = estimate_background(self)
+        if self.background.ndim == 1:
+            self.background = self.background[:, np.newaxis]
         return self.background
     
     def delete_energy_indices(self, indices: np.ndarray):

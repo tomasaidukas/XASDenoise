@@ -85,6 +85,12 @@ class XASDatabase:
         self.database_metadata = [m for m in self.database_metadata if not m.get(key) == value]
         self.spectra = [s for i, s in enumerate(self.spectra) if not self.database_metadata[i].get(key) == value]
 
+    def delete_spectrum_attributes(self, attribute: str) -> None:
+        for s in self.spectra:
+            if hasattr(s, attribute):
+                print(f"Deleting attribute {attribute} from spectrum {s.compound}")
+                setattr(s, attribute, None)
+
     def process_new_spectra(self):
         """Apply processing steps to newly added spectra"""
         if not self.spectra:
@@ -273,16 +279,17 @@ class XASDatabase:
                 - bin_size, bin_factor: Binning parameters
                 - downsample_size, downsample_factor: Downsampling parameters
                 - interpolation_method (str): Interpolation method to use (if applicable)
+                - resolution (float): Energy resolution for binning/downsampling
 
         """
         # Create energy grid if not provided
-        if energy_grid is None and 'E_pre_edge' in kwargs:
+        if energy_grid is None and 'E_pre_edge' in kwargs and 'resolution' not in kwargs:
             grid_type = kwargs.get('grid_type', 'linear_in_energy')
             E_pre_edge = kwargs['E_pre_edge']
             E_post_edge = kwargs['E_post_edge'] 
             N_pts = kwargs['N_pts']
             energy_grid = resampling_utils.create_energy_grid(grid_type, E_pre_edge, E_post_edge, N_pts, **kwargs)
-        
+            
         # Process each spectrum
         for spectrum in spectra:
             if resampling_method == 'interpolate':

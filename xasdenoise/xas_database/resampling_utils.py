@@ -71,6 +71,7 @@ def resample_spectra_onto_a_new_energy_grid(spectrum_list, energy_grid=None,
             - E_post_edge, E_post_edge, N_pts: Grid parameters
             - bin_size, bin_factor: Binning parameters
             - downsample_size, downsample_factor: Downsampling parameters
+            - resolution (float): Energy resolution for binning/downsampling
     
     Returns:
         list: List of resampled Spectrum objects
@@ -117,24 +118,29 @@ def _apply_binning(spectrum, energy_grid, **kwargs):
     """Apply binning to a spectrum."""
     bin_size = kwargs.get('bin_size')
     bin_factor = kwargs.get('bin_factor')
+    resolution = kwargs.get('resolution', None)
     
     if energy_grid is not None:
         energy_grid_shifted = energy_grid + spectrum.edge
         spectrum.bin_spectrum_onto_grid(energy_grid_shifted)
     else:
         grid_type = kwargs.get('grid_type', 'linear_in_energy')
-        spectrum.bin_spectrum(size=bin_size, factor=bin_factor, 
-                            energy_grid_type=grid_type)
+        spectrum.bin_spectrum(size=bin_size, 
+                              factor=bin_factor, 
+                              energy_grid_type=grid_type, 
+                              resolution=resolution)
 
 def _apply_downsampling(spectrum, energy_grid, **kwargs):
     """Apply downsampling to a spectrum."""
     downsample_size = kwargs.get('downsample_size')
     downsample_factor = kwargs.get('downsample_factor')
-    
-    energy_grid_shifted = energy_grid + spectrum.edge if energy_grid is not None else None
+    resolution = kwargs.get('resolution', None)
     grid_type = kwargs.get('grid_type', 'linear_in_energy')
+
+    energy_grid_shifted = energy_grid + spectrum.edge if energy_grid is not None else None
     
     spectrum.downsample_spectrum(size=downsample_size, 
                                factor=downsample_factor,
                                energy_grid_type=grid_type,
-                               new_energy_grid=energy_grid_shifted)
+                               new_energy_grid=energy_grid_shifted,
+                               resolution=resolution)
