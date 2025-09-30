@@ -119,11 +119,12 @@ def prepare_training_data(spectrum_obj_list, config=None, denoiser=None, method=
         method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
     """
     valid_keys = ['x', 'y_train', 'y_target', 'data_mask', 'compounds', 'elements', 'edges']
-    processed_data_all = {}
+    processed_data_lists = {}
     
     if not isinstance(spectrum_obj_list, list):
         spectrum_obj_list = [spectrum_obj_list]
 
+    # First, collect all arrays in lists
     tqdm_iterator = tqdm.tqdm(spectrum_obj_list, desc="Processing spectra for training data")
     for idx, spectrum_obj in enumerate(tqdm_iterator):
         if method == 'noise2noise':
@@ -133,30 +134,145 @@ def prepare_training_data(spectrum_obj_list, config=None, denoiser=None, method=
         else:
             raise ValueError("Invalid method. Choose either 'noise2noise' or 'noise2clean'.")
        
-        processed_data_all = _extend_dictionary(processed_data_all, processed_data, valid_keys)
+        processed_data_lists = _collect_arrays_in_lists(processed_data_lists, processed_data, valid_keys)
+    
+    # Pad arrays to same length and then concatenate
+    processed_data_all = _pad_and_concatenate_arrays(processed_data_lists, valid_keys)
     
     return processed_data_all
        
-def _extend_dictionary(processed_data, new_data, keys):
+def _collect_arrays_in_lists(processed_data_lists, new_data, keys):
     """
-    Extend the processed data dictionary with new data by concatenating arrays.
+    Collect arrays in lists instead of concatenating immediately.
     
     Args:
-        processed_data (dict): Existing processed data dictionary.
-        new_data (dict): New data to be added to the processed data.
+        processed_data_lists (dict): Dictionary containing lists of arrays.
+        new_data (dict): New data to be added to the lists.
+        keys (list): Valid keys to process.
         
     Returns:
-        dict: Updated processed data dictionary with concatenated arrays.
+        dict: Updated dictionary with arrays collected in lists.
     """
     for key, value in new_data.items():
         if key in keys:
-            if key in processed_data:
-                processed_data[key] = np.concatenate((processed_data[key], value), axis=0)
-            else:
-                processed_data[key] = value
+            if key not in processed_data_lists:
+                processed_data_lists[key] = []
+            processed_data_lists[key].append(value)
                 
-    return processed_data
+    return processed_data_lists
+
+def _pad_and_concatenate_arrays(processed_data_lists, keys):
+    """
+    Pad arrays to same length and concatenate them.
     
+    Args:
+        processed_data_lists (dict): Dictionary containing lists of arrays.
+        keys (list): Valid keys to process.
+        
+    Returns:
+        dict: Dictionary with padded and concatenated arrays.
+    """
+    processed_data_all = {}
+    
+    # First, convert lists to arrays and collect all samples
+    all_arrays = {}
+    for key in keys:
+        if key in processed_data_lists:
+            # Concatenate along the first axis (samples)
+            all_arrays[key] = []
+            for array_batch in processed_data_lists[key]:
+                for i in range(array_batch.shape[0]):
+                    all_arrays[key].append(array_batch[i])
+    
+    # Pad arrays that need padding (arrays with potentially different lengths along axis 1)
+    arrays_to_pad = ['x', 'y_train', 'y_target', 'data_mask']
+    scalar_arrays = ['compounds', 'elements', 'edges']
+    
+    # Check if we need padding by looking at array lengths
+    needs_padding = False
+    if 'x' in all_arrays and all_arrays['x']:
+        lengths = [len(arr) for arr in all_arrays['x']]
+        needs_padding = len(set(lengths)) > 1
+    
+    if needs_padding:
+        # Apply padding to make all arrays the same length
+        padded_x, padded_y_train, padded_y_target, padded_data_mask = _pad_arrays_to_same_length(
+            all_arrays.get('x', []),
+            all_arrays.get('y_train', []),
+            all_arrays.get('y_target', []),
+            all_arrays.get('data_mask', []),
+            all_arrays.get('edges', [])
+        )
+        
+        # Update the arrays with padded versions
+        if 'x' in all_arrays:
+            all_arrays['x'] = padded_x
+        if 'y_train' in all_arrays:
+            all_arrays['y_train'] = padded_y_train
+        if 'y_target' in all_arrays:
+            all_arrays['y_target'] = padded_y_target
+        if 'data_mask' in all_arrays:
+            all_arrays['data_mask'] = padded_data_mask
+    
+    # Now concatenate all arrays
+    for key in keys:
+        if key in all_arrays:
+            processed_data_all[key] = np.array(all_arrays[key])
+    
+    return processed_data_all
+
+def _pad_arrays_to_same_length(x0, y_train0, y_target0, data_mask0, edges0):
+    """
+    Pad arrays to the same length - updated version for the new data structure.
+    
+    Args:
+        x0 (list): List of energy arrays
+        y_train0 (list): List of training spectra
+        y_target0 (list): List of target spectra  
+        data_mask0 (list): List of data masks
+        edges0 (list): List of edge positions
+        
+    Returns:
+        tuple: Padded arrays as lists
+    """
+    if not x0:  # Empty list
+        return x0, y_train0, y_target0, data_mask0
+    
+    # Find the maximum length
+    max_len = max(len(arr) for arr in x0)
+    
+    # Pad each array
+    for i in range(len(x0)):
+        current_len = len(x0[i])
+        
+        if current_len < max_len:
+            # Find pre/post edge regions
+            edge_pos = edges0[i] if edges0 and i < len(edges0) else np.mean(x0[i])
+            pre_edge_len = np.sum(x0[i] < edge_pos)
+            post_edge_len = np.sum(x0[i] >= edge_pos)
+            
+            total_len = pre_edge_len + post_edge_len
+            pad_len = max_len - total_len
+            
+            if pad_len > 0:
+                # Use padding as a fraction of the pre-edge and post-edge lengths
+                pre_edge_pad = int(pad_len / total_len * pre_edge_len) if total_len > 0 else pad_len // 2
+                post_edge_pad = pad_len - pre_edge_pad
+                
+                # Pad the arrays
+                x0[i] = np.pad(x0[i], (pre_edge_pad, post_edge_pad), mode='edge')
+                y_train0[i] = np.pad(y_train0[i], (pre_edge_pad, post_edge_pad), mode='edge')
+                y_target0[i] = np.pad(y_target0[i], (pre_edge_pad, post_edge_pad), mode='edge')
+                
+                # Handle data_mask which might be None or contain None values
+                if data_mask0 and i < len(data_mask0) and data_mask0[i] is not None:
+                    data_mask0[i] = np.pad(data_mask0[i], (pre_edge_pad, post_edge_pad), mode='constant', constant_values=False)
+                elif data_mask0 and i < len(data_mask0):
+                    # Create a default mask if it was None
+                    data_mask0[i] = np.ones(max_len, dtype=bool)
+    
+    return x0, y_train0, y_target0, data_mask0
+
 def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, method='noise2noise',
                         model_path=None, **encoder_kwargs):
     """
