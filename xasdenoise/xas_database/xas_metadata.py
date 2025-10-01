@@ -103,7 +103,18 @@ class XASMetadata:
                 result[key] = value
         
         # Remove None values and empty strings for cleaner output
-        return {k: v for k, v in result.items() if v is not None and v != ""}
+        # Handle numpy arrays and other iterables separately to avoid ambiguous truth value errors
+        def should_keep(v):
+            if v is None:
+                return False
+            # Check if it's a numpy array or similar iterable (but not a string)
+            if hasattr(v, '__len__') and not isinstance(v, (str, dict)):
+                return True  # Keep arrays/lists even if empty
+            if v == "":
+                return False
+            return True
+        
+        return {k: v for k, v in result.items() if should_keep(v)}
     
     def from_dict(self, data: Dict[str, Any]) -> 'XASMetadata':
         """

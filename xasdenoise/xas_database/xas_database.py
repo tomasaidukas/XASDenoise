@@ -149,7 +149,7 @@ class XASDatabase:
         metadata = XASMetadata()
         metadata.from_dict(spectrum.metadata)
         self.database_metadata.append(metadata)
-
+    
     def update_spectrum_metadata(self) -> None:
         for spectrum, metadata in zip(self.spectra, self.database_metadata):
             spectrum.metadata = metadata.to_dict()
@@ -421,7 +421,7 @@ class XASDatabase:
 
         # Normalize spectra
         if normalize_spectrum:
-            processing_utils.normalize_spectrum(spectra, downsample=10, fit_individual=True)
+            processing_utils.normalize_spectrum(spectra, fit_individual=True)#, downsample=10)
 
         # Estimate background
         if estimate_background:
@@ -433,7 +433,7 @@ class XASDatabase:
             for spectrum in spectra:
                 glitch_mask = spectrum.glitch_mask
                 if (glitch_mask is not None) and (np.sum(glitch_mask) > 0):
-                    print(f'Processing spectrum {spectrum.compound}')
+                    print(f'Removing glitches from spectrum {spectrum.compound}')
                     preprocess_spectrum.remove_glitches(spectrum, glitch_mask, glitch_fill='interp_avg', crop_edges=True)
                     # preprocess_spectrum.remove_glitches(spectrum, glitch_mask, glitch_fill='delete', crop_edges=True)
 
@@ -798,12 +798,36 @@ class XASDatabase:
             
             # Fill in all possible fields
             for field_name in sorted_field_names:
-                row[field_name] = metadata_dict.get(field_name, None)
+                value = metadata_dict.get(field_name, None)
+                
+                # Special handling for glitches: convert numpy types to native Python types
+                if field_name == 'glitches' and value is not None:
+                    # Convert list of tuples, ensuring numpy types become native Python floats
+                    clean_glitches = []
+                    for glitch in value:
+                        if isinstance(glitch, (tuple, list)) and len(glitch) == 2:
+                            # Convert numpy float64 to native Python float
+                            clean_glitches.append((float(glitch[0]), float(glitch[1])))
+                    row[field_name] = str(clean_glitches) if clean_glitches else None
+                else:
+                    row[field_name] = value
             
             csv_data.append(row)
         
         # Create DataFrame and export
         df = pd.DataFrame(csv_data)
+        
+        # Sort alphabetically by element, then by compound
+        sort_columns = []
+        if 'element' in df.columns:
+            sort_columns.append('element')
+        if 'compound' in df.columns:
+            sort_columns.append('compound')
+        
+        if sort_columns:
+            df = df.sort_values(by=sort_columns, na_position='last')
+            # Reset spectrum_index after sorting to reflect new order
+            df['spectrum_index'] = range(len(df))
         
         # Reorder columns to put spectrum_index first, then element, compound, etc.
         preferred_order = ['spectrum_index', 'element', 'compound', 'name', 'edge', 'edge_type', 
@@ -824,6 +848,7 @@ class XASDatabase:
         df.to_csv(filepath, index=False)
         
         print(f"Exported metadata for {len(csv_data)} spectra to {filepath}")
+        print(f"Data sorted alphabetically by: {', '.join(sort_columns) if sort_columns else 'unsorted'}")
         print(f"Exported {len(sorted_field_names)} metadata fields: {', '.join(sorted_field_names[:10])}{'...' if len(sorted_field_names) > 10 else ''}")
     
     # ========================================================================

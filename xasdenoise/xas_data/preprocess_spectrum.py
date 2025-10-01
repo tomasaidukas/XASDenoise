@@ -283,7 +283,6 @@ def remove_glitches(data, glitch_mask0, glitch_fill='interp', exclude_edge=False
                 
     # perform glitch removal/interpolation        
     if glitch_mask is not None and np.sum(glitch_mask) > 0:     
-        print('Removing glitches')   
         x0 = data.energy
         for attr in data.y_arrays:
             y = getattr(data, attr)
@@ -349,7 +348,7 @@ def normalize_spectrum(data, reference=None, fitting_funcs=['1','V'], fit_indivi
         # data.spectrum = y / np.mean(y, axis=0) * np.mean(data.spectrum, axis=0)
     
     data.edge_step = edge_step
-
+    
 def estimate_background(data):
     """
     Estimate the background of an XAS spectrum using pre-edge and post-edge fits.

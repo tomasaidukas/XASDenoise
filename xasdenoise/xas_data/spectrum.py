@@ -210,8 +210,7 @@ class Spectrum:
         # also apply to "new_arrays" if they exist
         for attr in self.new_arrays:
             array = getattr(self, attr)
-            if array is not None and array.shape[0] > 1:
-                print(attr, array.shape, indices.shape)
+            if array is not None and array.shape[0] > 1 and array.shape[0] == len(indices):
                 setattr(self, attr, np.delete(array, indices, axis=0))
                 
         # Adjust pre-edge and post-edge regions if defined

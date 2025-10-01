@@ -195,43 +195,94 @@ class InteractiveDataProcessing:
         Create the UI components for spectrum normalization.
         """
         
-        # Buttons for normalization
-        idx = self.compound_idx
-        if idx is None:
-            idx = 0
-            
-        self.normalize_preedge_min = np.min(self.energy[idx])
-        self.normalize_preedge_min_slider = IntSlider(
-            value=self.normalize_preedge_min, min=np.min(self.energy[idx]), max=self.edges[idx], description="Pre edge min:", continuous_update=False, layout={'width': '300px'}
+        # Determine energy range across ALL spectra for this element
+        global_min_energy = int(np.min([np.min(e) for e in self.energy]))
+        global_max_energy = int(np.max([np.max(e) for e in self.energy]))
+        
+        # Use representative spectrum for initialization
+        idx = self.compound_idx if self.compound_idx is not None else 0
+        ref_edge = self.edges[idx]
+        ref_energy = self.energy[idx]
+        ref_spectrum = self.spectra[idx]
+        ref_metadata = self.spectrum_list[idx].metadata
+        
+        # Check if normalization parameters exist in metadata (from previous normalization)
+        has_stored_params = (
+            'pre_edge_min_E' in ref_metadata and 
+            ref_metadata.get('pre_edge_min_E') is not None
         )
-        # self.normalize_preedge_min_slider.observe(self.update_normalization_params, names='value')
+        
+        if has_stored_params:
+            # Use stored parameters (convert from edge-relative to absolute)
+            pre_edge_min_init = int(ref_edge + ref_metadata['pre_edge_min_E'])
+            pre_edge_max_init = int(ref_edge + ref_metadata['pre_edge_max_E'])
+            post_edge_min_init = int(ref_edge + ref_metadata['post_edge_min_E'])
+            post_edge_max_init = int(ref_edge + ref_metadata['post_edge_max_E'])
+            pre_edge_fit_func_init = ref_metadata.get('pre_edge_fit_func', 'V')
+            post_edge_fit_func_init = ref_metadata.get('post_edge_fit_func', 'V')
+            print(f"Loading stored normalization parameters for {self.spectrum_names[idx]}")
+        else:
+            # Use intelligent defaults based on minima detection
+            pre_edge_min_init = global_min_energy
+            pre_edge_max_init = int(self.find_first_minimum_before_edge(ref_energy, ref_spectrum, ref_edge))
+            post_edge_min_init = int(self.find_first_minimum_after_edge(ref_energy, ref_spectrum, ref_edge))
+            post_edge_max_init = global_max_energy
+            pre_edge_fit_func_init = 'V'
+            post_edge_fit_func_init = 'V'
+            print(f"Using auto-detected normalization parameters for {self.spectrum_names[idx]}")
+        
+        # Pre-edge minimum slider
+        self.normalize_preedge_min = pre_edge_min_init
+        self.normalize_preedge_min_slider = IntSlider(
+            value=self.normalize_preedge_min, 
+            min=global_min_energy, 
+            max=ref_edge, 
+            description="Pre edge min:", 
+            continuous_update=False, 
+            layout={'width': '300px'}
+        )
         self.add_observer_once(self.normalize_preedge_min_slider, self.update_normalization_params)
 
-        self.normalize_preedge_max = self.edges[idx]-5
+        # Pre-edge maximum slider
+        self.normalize_preedge_max = pre_edge_max_init
         self.normalize_preedge_max_slider = IntSlider(
-            value=self.normalize_preedge_max, min=np.min(self.energy[idx]), max=self.edges[idx], description="Pre edge max:", continuous_update=False, layout={'width': '300px'}
+            value=self.normalize_preedge_max, 
+            min=global_min_energy, 
+            max=ref_edge, 
+            description="Pre edge max:", 
+            continuous_update=False, 
+            layout={'width': '300px'}
         )
-        # self.normalize_preedge_max_slider.observe(self.update_normalization_params, names='value')
         self.add_observer_once(self.normalize_preedge_max_slider, self.update_normalization_params)
 
-        self.normalize_postedge_min = self.edges[idx]+5
+        # Post-edge minimum slider
+        self.normalize_postedge_min = post_edge_min_init
         self.normalize_postedge_min_slider = IntSlider(
-            value=self.normalize_postedge_min, min=self.edges[idx], max=np.max(self.energy[idx]), description="Post edge min:", continuous_update=False, layout={'width': '300px'}
+            value=self.normalize_postedge_min, 
+            min=ref_edge, 
+            max=global_max_energy, 
+            description="Post edge min:", 
+            continuous_update=False, 
+            layout={'width': '300px'}
         )
-        # self.normalize_postedge_min_slider.observe(self.update_normalization_params, names='value')
         self.add_observer_once(self.normalize_postedge_min_slider, self.update_normalization_params)
 
-        self.normalize_postedge_max = np.max(self.energy[idx])
+        # Post-edge maximum slider
+        self.normalize_postedge_max = post_edge_max_init
         self.normalize_postedge_max_slider = IntSlider(
-            value=self.normalize_postedge_max, min=self.edges[idx], max=np.max(self.energy[idx]), description="Post edge min:", continuous_update=False, layout={'width': '300px'}
+            value=self.normalize_postedge_max, 
+            min=ref_edge, 
+            max=global_max_energy, 
+            description="Post edge max:", 
+            continuous_update=False, 
+            layout={'width': '300px'}
         )
-        # self.normalize_postedge_max_slider.observe(self.update_normalization_params, names='value')
         self.add_observer_once(self.normalize_postedge_max_slider, self.update_normalization_params)
 
         self.pre_edge_fit_checkboxes = []
         self.post_edge_fit_checkboxes = []
-        self.pre_edge_fit_func = self.pre_edge_fit_funcs[0]
-        self.post_edge_fit_func = self.post_edge_fit_funcs[0]
+        self.pre_edge_fit_func = pre_edge_fit_func_init
+        self.post_edge_fit_func = post_edge_fit_func_init
         self.pre_edge_fit_func_selector = Dropdown(
             options=self.pre_edge_fit_funcs, value=self.pre_edge_fit_func, description="Pre-Edge Fit:"
             )
@@ -245,7 +296,21 @@ class InteractiveDataProcessing:
         self.add_observer_once(self.post_edge_fit_func_selector, self.update_normalization_params)
         
         self.normalize_button = Button(description="Normalize", layout={'width': '300px'})
-        self.normalize_button.on_click(self.normalize)          
+        self.normalize_button.on_click(self.normalize)
+        
+        self.restore_normalization_button = Button(
+            description="Restore Original Spectra", 
+            layout={'width': '300px'},
+            button_style='warning'
+        )
+        self.restore_normalization_button.on_click(self.restore_normalization)
+        
+        self.recalculate_mu_button = Button(
+            description="Recalculate μ from I0/I1", 
+            layout={'width': '300px'},
+            button_style='info'
+        )
+        self.recalculate_mu_button.on_click(self.recalculate_mu)
 
         # Existing normalization components
         self.normalization_controls = VBox([
@@ -264,7 +329,9 @@ class InteractiveDataProcessing:
             self.normalize_postedge_min_slider,
             self.normalize_postedge_max_slider,
             self.normalize_button,
-        ])                    
+            self.restore_normalization_button,
+            self.recalculate_mu_button,
+        ])
 
     def add_observer_once(self, widget, callback, event_name="value"):
         """
@@ -278,6 +345,74 @@ class InteractiveDataProcessing:
         
         if callback not in widget._trait_notifiers.get(event_name, []):
             widget.observe(callback, names=event_name)
+
+    def find_first_minimum_before_edge(self, energy, spectrum, edge, search_range=50):
+        """
+        Find the first local minimum in the spectrum before the edge.
+        
+        Args:
+            energy (np.ndarray): Energy array
+            spectrum (np.ndarray): Spectrum intensity values
+            edge (float): Edge energy
+            search_range (float): Energy range to search before edge (default 50 eV)
+            
+        Returns:
+            float: Energy value of the first minimum before edge
+        """
+        # Find indices in the pre-edge region
+        mask = (energy < edge) & (energy > edge - search_range)
+        if not np.any(mask):
+            # If no points in range, return edge - 10 as default
+            return edge - 10
+            
+        energy_region = energy[mask]
+        spectrum_region = spectrum[mask]
+        
+        # Find local minima using gradient
+        gradient = np.gradient(spectrum_region)
+        # Find where gradient changes from negative to positive
+        minima_indices = np.where((gradient[:-1] < 0) & (gradient[1:] > 0))[0]
+        
+        if len(minima_indices) > 0:
+            # Return the last (closest to edge) minimum
+            return energy_region[minima_indices[-1]]
+        else:
+            # No clear minimum found, return edge - 10
+            return edge - 10
+
+    def find_first_minimum_after_edge(self, energy, spectrum, edge, search_range=100):
+        """
+        Find the first local minimum in the spectrum after the edge.
+        
+        Args:
+            energy (np.ndarray): Energy array
+            spectrum (np.ndarray): Spectrum intensity values
+            edge (float): Edge energy
+            search_range (float): Energy range to search after edge (default 100 eV)
+            
+        Returns:
+            float: Energy value of the first minimum after edge
+        """
+        # Find indices in the post-edge region
+        mask = (energy > edge) & (energy < edge + search_range)
+        if not np.any(mask):
+            # If no points in range, return edge + 20 as default
+            return edge + 20
+            
+        energy_region = energy[mask]
+        spectrum_region = spectrum[mask]
+        
+        # Find local minima using gradient
+        gradient = np.gradient(spectrum_region)
+        # Find where gradient changes from negative to positive
+        minima_indices = np.where((gradient[:-1] < 0) & (gradient[1:] > 0))[0]
+        
+        if len(minima_indices) > 0:
+            # Return the first minimum after edge
+            return energy_region[minima_indices[0]]
+        else:
+            # No clear minimum found, return edge + 20
+            return edge + 20
             
     def show_main_menu_ui(self, b=None):
         """
@@ -369,6 +504,10 @@ class InteractiveDataProcessing:
         self.glitch_masks = [np.copy(spectrum.glitch_mask) if spectrum.glitch_mask is not None else np.zeros_like(spectrum.energy, dtype=bool) for spectrum in self.spectrum_list]
         self.spectrum_names = [spectrum.metadata['compound'] for spectrum in self.spectrum_list]
         
+        # Store original spectra for restoration
+        self.original_spectra = [np.copy(spectrum.spectrum) for spectrum in self.spectrum_list]
+        self.original_time_averaged_spectra = [np.copy(spectrum.time_averaged_spectrum) for spectrum in self.spectrum_list]
+        
         # Find duplicate names and modify them slightly by appending an index
         name_count = {}
         for i, name in enumerate(self.spectrum_names):
@@ -385,7 +524,7 @@ class InteractiveDataProcessing:
     # --- Normalization functions ---
     def update_normalization_params(self, b):
         """
-        Update normalization parameters for the selected spectrum.
+        Update normalization parameters for the selected spectrum or all spectra.
 
         Args:
             b: Button triggering the function (optional).
@@ -401,6 +540,7 @@ class InteractiveDataProcessing:
         self.add_normalization_lines()
 
         if self.compound_idx is not None:
+            # Single compound selected - preview normalization
             x_fit = self.energy[self.compound_idx].copy()
             y = self.spectra[self.compound_idx].copy()
             edge = self.edges[self.compound_idx]
@@ -414,23 +554,45 @@ class InteractiveDataProcessing:
             normalise = normalization.NormFit()
             normalise.mask = data_mask
             normalise.downsample = 1
-            # for time in range(y.shape[1]):                
-                # normalize the spectrum
-                # y[:,time], _ = normalise.norm(x_fit[data_mask], y[data_mask,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
-                # y[:,time], _ = normalise.norm(x_fit, y[:,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
             y, _ = normalise.norm(x_fit, y, y, self.pre_edge_fit_params, self.post_edge_fit_params, edge)
                 
             self.update_plot_normalization(y)
+        else:
+            # "All" selected - preview normalization for all compounds
+            print("Previewing normalization for all compounds...")
+            # Use the first compound's edge as reference
+            ref_edge = self.edges[0]
+            self.pre_edge_fit_params = [self.normalize_preedge_min-ref_edge, self.normalize_preedge_max-ref_edge, self.pre_edge_fit_func]
+            self.post_edge_fit_params = [self.normalize_postedge_min-ref_edge, self.normalize_postedge_max-ref_edge, self.post_edge_fit_func]
+            print(f"Pre edge fit params (relative to edge): {self.pre_edge_fit_params}")
+            print(f"Post edge fit params (relative to edge): {self.post_edge_fit_params}")
+            
+            # Preview normalization for all compounds
+            preview_spectra = []
+            for idx in range(len(self.spectrum_list)):
+                x_fit = self.energy[idx].copy()
+                y = self.spectra[idx].copy()
+                edge = self.edges[idx]
+                data_mask = ~self.current_glitch_masks[idx]
+                
+                normalise = normalization.NormFit()
+                normalise.mask = data_mask
+                normalise.downsample = 1
+                y_norm, _ = normalise.norm(x_fit, y, y, self.pre_edge_fit_params, self.post_edge_fit_params, edge)
+                preview_spectra.append(y_norm)
+            
+            self.update_plot_normalization_all(preview_spectra)
         
     def normalize(self, b):
         """
-        Normalize the selected spectrum based on the specified ranges.
+        Normalize the selected spectrum or all spectra based on the specified ranges.
 
         Args:
             b: Button triggering the function (optional).
         """
         
         if self.compound_idx is not None:
+            # Single compound selected
             x_fit = self.energy[self.compound_idx]
             y = self.spectrum_list[self.compound_idx].spectrum.copy()
             edge = self.edges[self.compound_idx]
@@ -440,17 +602,116 @@ class InteractiveDataProcessing:
             normalise.mask = data_mask
             normalise.downsample = 1
             for time in range(y.shape[1]):                
-                # normalize the spectrum
-                # y[:,time], _ = normalise.norm(x_fit[data_mask], y[data_mask,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
                 y[:,time], _ = normalise.norm(x_fit, y[:,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
             
             self.spectrum_list[self.compound_idx].spectrum = y.copy()
             y = self.spectrum_list[self.compound_idx].time_averaged_spectrum
             self.spectra[self.compound_idx] = y
             
+            # Store normalization parameters in existing metadata fields (relative to edge)
+            self.spectrum_list[self.compound_idx].metadata['normalized'] = True
+            self.spectrum_list[self.compound_idx].metadata['pre_edge_min_E'] = self.pre_edge_fit_params[0]
+            self.spectrum_list[self.compound_idx].metadata['pre_edge_max_E'] = self.pre_edge_fit_params[1]
+            self.spectrum_list[self.compound_idx].metadata['post_edge_min_E'] = self.post_edge_fit_params[0]
+            self.spectrum_list[self.compound_idx].metadata['post_edge_max_E'] = self.post_edge_fit_params[1]
+            self.spectrum_list[self.compound_idx].metadata['pre_edge_fit_func'] = self.pre_edge_fit_params[2]
+            self.spectrum_list[self.compound_idx].metadata['post_edge_fit_func'] = self.post_edge_fit_params[2]
+            
             print("Spectrum normalized successfully.")
             self.add_normalization_lines()
-    
+        else:
+            # "All" selected - normalize all compounds
+            num_compounds = len(self.spectrum_list)
+            print(f"Normalizing all {num_compounds} compounds for element {self.selected_element}...")
+            
+            for idx in range(num_compounds):
+                x_fit = self.energy[idx]
+                y = self.spectrum_list[idx].spectrum.copy()
+                edge = self.edges[idx]
+                data_mask = ~self.current_glitch_masks[idx]
+                
+                normalise = normalization.NormFit()
+                normalise.mask = data_mask
+                normalise.downsample = 1
+                
+                for time in range(y.shape[1]):
+                    y[:,time], _ = normalise.norm(x_fit, y[:,time], y[:,time], self.pre_edge_fit_params, self.post_edge_fit_params, edge)
+                
+                # Update the spectrum
+                self.spectrum_list[idx].spectrum = y.copy()
+                self.spectra[idx] = self.spectrum_list[idx].time_averaged_spectrum
+                
+                # Store normalization parameters in existing metadata fields (relative to edge)
+                self.spectrum_list[idx].metadata['normalized'] = True
+                self.spectrum_list[idx].metadata['pre_edge_min_E'] = self.pre_edge_fit_params[0]
+                self.spectrum_list[idx].metadata['pre_edge_max_E'] = self.pre_edge_fit_params[1]
+                self.spectrum_list[idx].metadata['post_edge_min_E'] = self.post_edge_fit_params[0]
+                self.spectrum_list[idx].metadata['post_edge_max_E'] = self.post_edge_fit_params[1]
+                self.spectrum_list[idx].metadata['pre_edge_fit_func'] = self.pre_edge_fit_params[2]
+                self.spectrum_list[idx].metadata['post_edge_fit_func'] = self.post_edge_fit_params[2]
+            
+            print(f"Successfully normalized all {num_compounds} compounds.")
+            self.initialize_plot()  # Refresh plot to show all normalized spectra
+
+    def restore_normalization(self, b):
+        """
+        Restore spectra to their original un-normalized state.
+        
+        Args:
+            b: Button triggering the function (optional).
+        """
+        if self.compound_idx is not None:
+            # Restore single compound
+            self.spectrum_list[self.compound_idx].spectrum = np.copy(self.original_spectra[self.compound_idx])
+            self.spectra[self.compound_idx] = np.copy(self.original_time_averaged_spectra[self.compound_idx])
+            
+            # Reset normalization metadata to defaults
+            self.spectrum_list[self.compound_idx].metadata['normalized'] = False
+            # Keep the fields but reset to default values (they're still useful for next normalization)
+            # No need to delete them as they're part of the standard metadata structure
+            
+            print(f"Restored original spectrum for {self.spectrum_names[self.compound_idx]}")
+            self.initialize_plot()
+        else:
+            # Restore all compounds
+            for idx in range(len(self.spectrum_list)):
+                self.spectrum_list[idx].spectrum = np.copy(self.original_spectra[idx])
+                self.spectra[idx] = np.copy(self.original_time_averaged_spectra[idx])
+                
+                # Reset normalization metadata to defaults
+                self.spectrum_list[idx].metadata['normalized'] = False
+                # Keep the fields but reset to default values
+            
+            print(f"Restored original spectra for all {len(self.spectrum_list)} {self.selected_element} compounds")
+            self.initialize_plot()
+
+    def recalculate_mu(self, b):
+        """
+        Recalculate mu (absorption) from I0 and I1 using spectrum.compute_mu().
+        This is useful when you want to recompute the absorption after restoring data
+        or before re-normalizing.
+        
+        Args:
+            b: Button triggering the function (optional).
+        """
+        if self.compound_idx is not None:
+            # Recalculate mu for single compound
+            self.spectrum_list[self.compound_idx].compute_mu()
+            # Update the displayed spectrum
+            self.spectra[self.compound_idx] = self.spectrum_list[self.compound_idx].time_averaged_spectrum
+            
+            print(f"Recalculated μ for {self.spectrum_names[self.compound_idx]}")
+            self.initialize_plot()
+        else:
+            # Recalculate mu for all compounds
+            for idx in range(len(self.spectrum_list)):
+                self.spectrum_list[idx].compute_mu()
+                self.spectra[idx] = self.spectrum_list[idx].time_averaged_spectrum
+            
+            print(f"Recalculated μ for all {len(self.spectrum_list)} {self.selected_element} compounds")
+            self.initialize_plot()
+
+
     def update_plot_normalization(self, y):
         """
         Update the Plotly plot with the normalized spectrum.
@@ -463,6 +724,26 @@ class InteractiveDataProcessing:
         y_glitch = np.where(self.current_glitch_masks[idx], y, np.nan)
         self.fig.data[0].y = y
         self.fig.data[1].y = y_glitch
+
+    def update_plot_normalization_all(self, preview_spectra):
+        """
+        Update the Plotly plot with all normalized spectra when 'All' is selected.
+
+        Args:
+            preview_spectra (list): List of normalized spectrum data arrays.
+        """
+        # Update all traces in the plot
+        trace_idx = 0
+        for idx in range(len(self.spectrum_list)):
+            y_norm = preview_spectra[idx]
+            y_glitch = np.where(self.current_glitch_masks[idx], y_norm, np.nan)
+            
+            # Update the main spectrum trace
+            self.fig.data[trace_idx].y = y_norm
+            trace_idx += 1
+            # Update the glitch trace
+            self.fig.data[trace_idx].y = y_glitch
+            trace_idx += 1
             
     def add_normalization_lines(self):
         """
@@ -470,30 +751,30 @@ class InteractiveDataProcessing:
         """
         
         self.remove_normalization_lines()  # Ensure no duplicate lines
-        if self.compound_idx is not None:
-            lines = [
-                {"name": "pre_min", "x0": self.normalize_preedge_min_slider.value, "x1": self.normalize_preedge_min_slider.value,
-                "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "red", "dash": "dot"}},
-                {"name": "pre_max", "x0": self.normalize_preedge_max_slider.value, "x1": self.normalize_preedge_max_slider.value,
-                "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "red", "dash": "dot"}},
-                {"name": "post_min", "x0": self.normalize_postedge_min_slider.value, "x1": self.normalize_postedge_min_slider.value,
-                "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "blue", "dash": "dot"}},
-                {"name": "post_max", "x0": self.normalize_postedge_max_slider.value, "x1": self.normalize_postedge_max_slider.value,
-                "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "blue", "dash": "dot"}},
-            ]
+        # Add lines for both single compound and "All" selection
+        lines = [
+            {"name": "pre_min", "x0": self.normalize_preedge_min_slider.value, "x1": self.normalize_preedge_min_slider.value,
+            "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "red", "dash": "dot"}},
+            {"name": "pre_max", "x0": self.normalize_preedge_max_slider.value, "x1": self.normalize_preedge_max_slider.value,
+            "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "red", "dash": "dot"}},
+            {"name": "post_min", "x0": self.normalize_postedge_min_slider.value, "x1": self.normalize_postedge_min_slider.value,
+            "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "blue", "dash": "dot"}},
+            {"name": "post_max", "x0": self.normalize_postedge_max_slider.value, "x1": self.normalize_postedge_max_slider.value,
+            "y0": 0, "y1": 1, "xref": 'x', "yref": 'paper', "line": {"color": "blue", "dash": "dot"}},
+        ]
 
-            # Update or add lines
-            existing_shapes = {shape.name: shape for shape in self.fig.layout.shapes}
+        # Update or add lines
+        existing_shapes = {shape.name: shape for shape in self.fig.layout.shapes}
 
-            for line in lines:
-                if line["name"] in existing_shapes:
-                    # Update existing line
-                    shape = existing_shapes[line["name"]]
-                    shape.x0 = line["x0"]
-                    shape.x1 = line["x1"]
-                else:
-                    # Add new line
-                    self.fig.add_shape(line)
+        for line in lines:
+            if line["name"] in existing_shapes:
+                # Update existing line
+                shape = existing_shapes[line["name"]]
+                shape.x0 = line["x0"]
+                shape.x1 = line["x1"]
+            else:
+                # Add new line
+                self.fig.add_shape(line)
 
     def remove_normalization_lines(self):
         """
@@ -1082,10 +1363,11 @@ class InteractiveDataProcessing:
         for spectrum, glitch_mask in zip(self.spectrum_list, self.current_glitch_masks):
             spectrum.glitch_mask = glitch_mask.copy()
             
-            spectrum.metadata['glitches'] = {}
+            # Store glitches as a list of tuples
+            spectrum.metadata['glitches'] = []
             if glitch_mask is not None:
                 regions = self.extract_regions(glitch_mask.astype(bool))  
                 for i, (start, end) in enumerate(regions):
-                    spectrum.metadata['glitches'][f'glitch_{i+1}'] = (spectrum.energy[start], spectrum.energy[end])
+                    spectrum.metadata['glitches'].append((spectrum.energy[start], spectrum.energy[end]))
                 
         print("Spectrum glitch masks have been successfully updated.")
