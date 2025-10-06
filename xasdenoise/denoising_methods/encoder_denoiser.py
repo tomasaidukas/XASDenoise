@@ -7,6 +7,7 @@ import gc
 from scipy import interpolate
 from xasdenoise.denoising_methods.denoising_utils import downsample_data
 from tqdm import tqdm
+import pickle
 
 # Conditional imports for torch and gpytorch
 TORCH_AVAILABLE = False
@@ -30,7 +31,7 @@ class EncoderDenoiser:
     Note: Requires PyTorch. If not available, raises ImportError on initialization.
     """
     def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, 
-                 channels=None, dropout_rate=0, normalization_method='l2norm'):
+                 channels=None, dropout_rate=0, normalization_method=None):
         """
         Initialize the EncoderDenoiser with a specified autoencoder architecture.
 
@@ -46,7 +47,7 @@ class EncoderDenoiser:
         # Check dependencies before initialization
         if not TORCH_AVAILABLE:
             raise ImportError(
-                "PyTorch is required for GPDenoiser but not available. "
+                "PyTorch is required for EncoderDenoiser but not available. "
                 "Install with: pip install torch"
             )
         
@@ -83,7 +84,14 @@ class EncoderDenoiser:
         Returns:
             str: Best available device ('cuda', 'mps', or 'cpu').
         """
-        if torch.cuda.is_available():
+         # Set CUDA device BEFORE any torch.cuda calls to prevent GPU 0 initialization
+        if TORCH_AVAILABLE and self.gpu_index is not None and self.gpu_index >= 0:
+            try:
+                torch.cuda.set_device(self.gpu_index)
+            except Exception:
+                pass
+            
+        if TORCH_AVAILABLE and torch.cuda.is_available():
             return f'cuda:{self.gpu_index}' if hasattr(self, 'gpu_index') else 'cuda'
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             return 'mps'
@@ -98,6 +106,13 @@ class EncoderDenoiser:
             torch.device: The computation device to use.
         """
         
+        # Set CUDA device BEFORE any torch.cuda calls to prevent GPU 0 initialization
+        if TORCH_AVAILABLE and self.gpu_index is not None and self.gpu_index >= 0:
+            try:
+                torch.cuda.set_device(self.gpu_index)
+            except Exception:
+                pass
+            
         if self.device.startswith('cuda') and torch.cuda.is_available():
             device = torch.device(self.device)
             if ':' in self.device:
@@ -151,39 +166,6 @@ class EncoderDenoiser:
                     
             except Exception as e:
                 print(f"Error occurred while cleaning GPU memory: {e}")
-    
-    def _clean_model(self):
-        """
-        Clean the model by deleting its attributes and clearing GPU memory.
-        """
-        
-        if hasattr(self, 'encoder_model'):
-            setattr(self, 'encoder_model', None)
-
-         # Now systematically search for and clean any tensor attributes
-        for attr_name in list(vars(self).keys()):
-            attr_val = getattr(self, attr_name)
-            
-            # Clean PyTorch tensors on any GPU device
-            if isinstance(attr_val, torch.Tensor) and attr_val.device in ['cuda', 'mps']:
-                # Either set to None or move to CPU depending on size
-                if attr_val.numel() > 10000:  # Large tensors - just delete
-                    setattr(self, attr_name, None)
-                else:  # Small tensors - move to CPU
-                    try:
-                        setattr(self, attr_name, attr_val.cpu().clone().detach())
-                    except:
-                        setattr(self, attr_name, None)
-            
-            # Clean PyTorch modules
-            elif isinstance(attr_val, torch.nn.Module):
-                setattr(self, attr_name, None)
-            
-            # Clean lists or tuples that might contain tensors
-            elif isinstance(attr_val, (list, tuple)) and len(attr_val) > 0:
-                # Check if it contains tensors and clean if needed
-                if any(isinstance(item, torch.Tensor) for item in attr_val):
-                    setattr(self, attr_name, None)
                     
     def to_tensor(self, arr):
         """
@@ -215,6 +197,9 @@ class EncoderDenoiser:
         Returns:
             torch.Tensor: Normalized training data.
         """
+        if method == None:
+            return y
+        
         if method == 'minmax':
             if compute_norm:
                 y_max = y.max(axis=1).values[:, None]
@@ -222,6 +207,15 @@ class EncoderDenoiser:
                 self.norm_params['y'] = (y_min, y_max)
             y_min, y_max = self.norm_params['y']
             return 2 * (y - y_min) / (y_max - y_min) - 1
+        
+        elif method == 'percentile':
+            low, high = 1, 99  # or 5, 95 depending on your data
+            if compute_norm:
+                y_low = torch.quantile(y, low / 100.0, dim=1, keepdim=True)
+                y_high = torch.quantile(y, high / 100.0, dim=1, keepdim=True)
+                self.norm_params['y'] = (y_low, y_high)
+            y_low, y_high = self.norm_params['y']
+            return 2 * (y - y_low) / (y_high - y_low + 1e-8) - 1
         
         elif method == 'l2norm':
             if compute_norm:
@@ -252,9 +246,15 @@ class EncoderDenoiser:
         Returns:
             torch.Tensor: Denormalized denoised data.
         """
+        if method == None:
+            return y
+        
         if method == 'minmax':
             y_min, y_max = self.norm_params['y']
             return (y + 1) * (y_max - y_min) / 2 + y_min
+        elif method == 'percentile':
+            y_low, y_high = self.norm_params['y']
+            return (y + 1) * (y_high - y_low) / 2 + y_low
         elif method == 'l2norm':
             y_norm = self.norm_params['y']
             return y * (y_norm + 1e-8)  # Avoid division by zero
@@ -307,7 +307,7 @@ class EncoderDenoiser:
 
         y_train = self.normalize_data(y_train, method=self.normalization_method)
         y_target = self.normalize_data(y_target, compute_norm=False, method=self.normalization_method)
-
+        
         # Prepare datasets
         train_dataset = TensorDataset(y_train, y_target, mask_train) if mask_train is not None else TensorDataset(y_train, y_target)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -467,14 +467,14 @@ class EncoderDenoiser:
                 
                 if avg_epoch_loss < metrics['best_loss']:
                     metrics['best_loss'] = avg_epoch_loss
-                
+                    best_model_state = self.encoder_model.state_dict().copy()
+                    
                 # Early stopping logic
                 if val_loss is not None:
                     if val_loss < best_val_loss:
                         best_val_loss = val_loss
                         patience_counter = 0
                         # Save best model state
-                        best_model_state = self.encoder_model.state_dict().copy()
                         if self.verbose:
                             print(f"\nNew best validation loss: {val_loss:.8f}")
                     else:
@@ -487,8 +487,6 @@ class EncoderDenoiser:
                         print(f"\nEarly stopping at epoch {epoch+1}! No improvement for {early_stopping_patience} epochs.")
                         print(f"Best validation loss: {best_val_loss:.8f}")
                         # Restore best model
-                        if best_model_state is not None:
-                            self.encoder_model.load_state_dict(best_model_state)
                         break
                 
                 # Final update for this epoch with validation loss
@@ -513,14 +511,20 @@ class EncoderDenoiser:
     
         # Save the trained model
         if save_path is not None:
-            # Save the best model if we have it, otherwise save current
+            torch.save(self.encoder_model.state_dict(), save_path)
+            print(f"Final model saved to {save_path}")
+            
+            # Save the best model if we have it
             if best_model_state is not None:
-                torch.save(best_model_state, save_path)
-                print(f"Best model saved to {save_path} (val_loss: {best_val_loss:.8f})")
-            else:
-                torch.save(self.encoder_model.state_dict(), save_path)
-                print(f"Final model saved to {save_path}")
-        
+                torch.save(best_model_state, save_path.replace('.pth', '_best.pth'))
+                print(f"Best model saved to {save_path.replace('.pth', '_best.pth')} (val_loss: {best_val_loss:.8f})")
+
+            # Also save the training metrics
+            metrics_path = save_path.replace('.pth', '_training_metrics.pkl')
+            with open(metrics_path, 'wb') as f:
+                pickle.dump(metrics, f)
+            print(f"Training metrics saved to {metrics_path}")
+
         return metrics
     
     def _augment_xas_data(self, y_batch):

@@ -175,7 +175,8 @@ class DataPreprocessor:
             # Use time-averaged data for baseline estimation
             y_avg = np.mean(y, axis=1)
             edge = self._get_edge_energy(x, y, spectrum_obj)
-            baseline = baseline_estimation.fit_edge_step(x, y_avg, edge)[:, None]
+            baseline_step_func = self.config.get('baseline_step_func', 'tanh')
+            baseline = baseline_estimation.fit_edge_step(x, y_avg, edge, step_function=baseline_step_func)[:, None]
             
         elif method == 'step_not_normalized':
             y_avg = np.mean(y, axis=1)
@@ -339,7 +340,7 @@ class DataPreprocessor:
                             figsize: tuple = (8, 6)):
         """Plot noise estimation results."""
         plt.figure(figsize=figsize)
-        plt.plot(x, noise[:, 0], label='Estimated Noise (σ)')
+        plt.plot(x, noise[:, 0], label='Estimated Noise')
         plt.xlabel('Energy (eV)')
         plt.ylabel('Noise Level')
         plt.title('Noise Estimation')

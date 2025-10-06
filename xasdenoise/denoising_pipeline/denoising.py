@@ -75,10 +75,10 @@ class DenoisingProcessor:
             masked_data, x_predict, noise_predict, denoiser, edge_energy, x_original
         )
         
-        # Convert to float32 for memory efficiency
-        y_denoised = self._convert_to_float32(y_denoised)
-        y_error = self._convert_to_float32(y_error)
-        y_noise = self._convert_to_float32(y_noise)
+        # # Convert to float32 for memory efficiency
+        # y_denoised = self._convert_to_float32(y_denoised)
+        # y_error = self._convert_to_float32(y_error)
+        # y_noise = self._convert_to_float32(y_noise)
         
         return y_denoised, y_error, y_noise
     
@@ -99,7 +99,7 @@ class DenoisingProcessor:
         # Apply mask
         if data_mask is None:
             data_mask = np.ones_like(x, dtype=bool)
-        
+            
         masked_data = {
             'x': x[data_mask],
             'y': y[data_mask, :],
@@ -117,7 +117,7 @@ class DenoisingProcessor:
         """Apply the appropriate denoising strategy based on configuration."""
         
         # Determine strategy based on configuration
-        downsampling_method = self.config.get('data_downsampling_method')
+        downsampling_method = self.config.get('data_downsampling_method', None)
         split_regions = self.config.get('split_xanes_exafs', False)
         
         if downsampling_method is not None:

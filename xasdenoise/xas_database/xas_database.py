@@ -143,6 +143,7 @@ class XASDatabase:
         self.clear_metadata()
         for spectrum in self.spectra:
             self.append_metadata_from_spectrum(spectrum)
+        self.create_glitch_metadata_from_masks()
 
     def append_metadata_from_spectrum(self, spectrum: Spectrum) -> None:
         """Append metadata from a single spectrum."""
@@ -883,22 +884,17 @@ class XASDatabase:
         if self.spectra is None:
             print("No spectra in database. Load spectra first.")
             return
-        
         for spectrum, metadata in zip(self.spectra, self.database_metadata):
             glitch_mask = spectrum.glitch_mask
-            if glitch_mask is not None and len(glitch_mask) == len(spectrum.energy):
-                # Label the continuous regions
-                if np.sum(glitch_mask) == 0:
-                    return []
-                else:
-                    labeled_array, num_features = label(glitch_mask)
-                    # Extract start and end indices for each labeled region
-                    regions = []
-                    for label_id in range(1, num_features + 1):  # Labels start from 1
-                        indices = np.where(labeled_array == label_id)[0]
-                        start, end = indices[0], indices[-1]
-                        
-                        regions.append((spectrum.energy[start], spectrum.energy[end]))
+            if glitch_mask is not None:# and len(glitch_mask) == len(spectrum.energy):
+                labeled_array, num_features = label(glitch_mask)
+                # Extract start and end indices for each labeled region
+                regions = []
+                for label_id in range(1, num_features + 1):  # Labels start from 1
+                    indices = np.where(labeled_array == label_id)[0]
+                    start, end = indices[0], indices[-1]
+                    
+                    regions.append((spectrum.energy[start], spectrum.energy[end]))
             
             # update glitch metadata            
             metadata.glitches = regions

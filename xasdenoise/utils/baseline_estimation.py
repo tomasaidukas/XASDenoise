@@ -147,8 +147,8 @@ def fit_edge_step_not_normalized(x, y, edge, pre_edge_idx, post_edge_idx,
     background = best_background
     return background
 
-def fit_edge_step(x, y, edge_guess=None, step_function='asymmetric_tanh', 
-                  robust_fit=True, max_iter=100):
+def fit_edge_step(x, y, edge_guess=None, step_function='tanh', 
+                  robust_fit=False, max_iter=100):
     """
     Fit a smooth step-like baseline function directly to a normalized XAS spectrum.
     
@@ -161,6 +161,7 @@ def fit_edge_step(x, y, edge_guess=None, step_function='asymmetric_tanh',
         edge_guess (float, optional): Initial guess for edge position. If None, uses midpoint.
         step_function (str): Type of step function to use:
             - 'asymmetric_tanh': Asymmetric tanh transitions
+            - 'tanh': Symmetric tanh transition
         robust_fit (bool): Use robust fitting to handle outliers
         max_iter (int): Maximum iterations for fitting
         
@@ -168,6 +169,8 @@ def fit_edge_step(x, y, edge_guess=None, step_function='asymmetric_tanh',
         tuple: (baseline, fit_params) where baseline is the fitted step function
                and fit_params contains the fitted parameters
     """
+    def tanh_step(x, x0, width, tmp):
+        return 1 * 0.5 * (1 + np.tanh((x - x0) / width))
     
     def asymmetric_step(x, x0, width_left, width_right):
         """
@@ -211,6 +214,8 @@ def fit_edge_step(x, y, edge_guess=None, step_function='asymmetric_tanh',
     # Select step function based on user choice
     if step_function == 'asymmetric_tanh':
         step_func = asymmetric_step
+    elif step_function == 'tanh':
+        step_func = tanh_step
     else:
         raise ValueError(f"Unknown step function: {step_function}. Use 'asymmetric_tanh'")
     

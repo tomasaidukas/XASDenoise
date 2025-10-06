@@ -338,6 +338,9 @@ def normalize_spectrum(data, reference=None, fitting_funcs=['1','V'], fit_indivi
         
     # Normalize spectrum using the best pre/post fits
     if fit_individual:
+        # run one normalization on the averaged data to get the initial fit parameters
+        _, _ = normalise.norm(x_fit, y_fit, y, pre_edge_fit_params, post_edge_fit_params, edge)
+
         edge_step = np.zeros(y.shape[1])
         for time in range(y.shape[1]):
             data.spectrum[:, time], edge_step[time] = normalise.norm(
@@ -364,6 +367,7 @@ def estimate_background(data):
     x_fit = data.energy + 1e-3
     y_fit = data.time_averaged_spectrum
     edge = data.edge
+    edge_step_func = data.metadata.get('edge_step_func', 'tanh')
     
     # pre_edge_idx = data.pre_edge_region_indices
     # post_edge_idx = data.post_edge_region_indices
@@ -376,7 +380,7 @@ def estimate_background(data):
     #                                                               fitting_funcs)
     
     # TODO: here it is assumed that the spectrum is normalized
-    background = baseline_estimation.fit_edge_step(x_fit, y_fit, edge, robust_fit=False)
+    background = baseline_estimation.fit_edge_step(x_fit, y_fit, edge, robust_fit=False, step_function=edge_step_func)
     data.background = background
     
     return background

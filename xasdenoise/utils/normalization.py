@@ -137,9 +137,6 @@ class NormFit:
         Returns:
             array: Normalized Y values.
         """ 
-        # normalize the range to something reasonable if needed
-        dataY /= dataY_fit.max()
-        dataY_fit /= dataY_fit.max()
         
         self.e0 = e0
         dataY_pre_fit, self.fit_p0_pre_edge = self._fit_edge(dataX_fit, dataY_fit, pre_edge_parameters, 'pre-edge', self.fit_p0_pre_edge)

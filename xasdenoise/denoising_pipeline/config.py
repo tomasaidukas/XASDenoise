@@ -21,7 +21,8 @@ class PipelineConfig:
     # ============ Data Preprocessing Parameters ============
     # Baseline removal settings
     data_baseline_removal: Optional[str] = None  # None, 'step', 'step_not_normalized', 'poly', 'smooth'
-    baseline_fitting_funcs: List[str] = field(default_factory=lambda: ['1', '1'])
+    baseline_fitting_funcs: List[str] = field(default_factory=lambda: ['1', '1'])  # fitting functions for pre/post edge when using data_baseline_removal='step_not_normalized'
+    baseline_step_func: str = 'tanh'  # 'tanh', 'asymmetric_tanh' # step function when using data_baseline_removal='step'
     
     # Noise estimation settings
     noise_estimation_mode: int = 1
@@ -121,6 +122,7 @@ class PipelineConfig:
         return {
             'baseline_removal': self.data_baseline_removal,
             'baseline_fitting_funcs': self.baseline_fitting_funcs,
+            'baseline_step_func': self.baseline_step_func,
             'noise_estimation_mode': self.noise_estimation_mode,
             'noise_crop_region': self.noise_crop_region,
             'noise_window': self.noise_window,

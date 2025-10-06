@@ -11,10 +11,8 @@ import copy
 from scipy.ndimage import gaussian_filter1d, uniform_filter1d
 from scipy.spatial.distance import pdist
 import warnings
-import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
-from joblib import Parallel, delayed
-import joblib
+
+
 
 # Conditional imports for torch and gpytorch
 TORCH_AVAILABLE = False
@@ -93,7 +91,6 @@ class GPDenoiser:
         # Device and GPU settings
         self.gpu_index = gpu_index
         self.use_gpu = False
-        self.gpu_device = self._initialize_gpu_device()
 
         # noise estimation params
         self.noise_scale = 1  # multiplicative scaling parameter to enhance or dampen the noise.
@@ -167,16 +164,7 @@ class GPDenoiser:
         # warnings.filterwarnings("ignore", category=NumericalWarning,
         #                       message="Very small noise values detected")
 
-        # Add parallel processing parameters
-        self.parallel_windows = False  # Enable parallel window processing
-        self.max_workers = mp.cpu_count() // 2  # Number of parallel workers
-        # Track available accelerators; on macOS MPS is treated as a GPU-like accelerator
-        try:
-            cuda_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
-        except Exception:
-            cuda_count = 0
-        self.available_gpus = list(range(cuda_count)) if cuda_count > 0 else (["mps"] if MPS_AVAILABLE else [])
-        self.parallel_backend = 'joblib'  # 'joblib', 'multiprocessing', 'threading'
+
 
         
     def _get_current_state(self):
@@ -223,6 +211,13 @@ class GPDenoiser:
         Select the appropriate computation device (CPU or GPU).
         """
         
+        # Set CUDA device BEFORE any torch.cuda calls to prevent GPU 0 initialization
+        if TORCH_AVAILABLE and self.gpu_index is not None and self.gpu_index >= 0:
+            try:
+                self.gpu_device = torch.cuda.set_device(self.gpu_index)
+            except Exception:
+                pass
+        
         if self.use_gpu:
             # Prefer CUDA, else Apple MPS
             if TORCH_AVAILABLE and torch.cuda.is_available():
@@ -235,44 +230,6 @@ class GPDenoiser:
                 self.device = torch.device("cpu")
         else:
             self.device = torch.device("cpu")
-        
-    def _initialize_gpu_device(self):
-        """
-        Initialize and return the computation device (GPU or CPU).
-
-        Returns:
-            torch.device: The computation device to use.
-        """
-        if self.use_gpu:
-            # Prefer CUDA if available, else Apple MPS, else CPU
-            if TORCH_AVAILABLE and torch.cuda.is_available():
-                device = torch.device(f"cuda:{self.gpu_index}")
-                try:
-                    torch.cuda.set_device(device)  # Specify your GPU device index
-                    torch.empty(1, device=device)  # Initialize CUDA context on the target GPU
-                    self._clean_gpu_memory()
-                except Exception:
-                    pass
-
-                if self.verbose:
-                    try:
-                        print(f"Using GPU index: {self.gpu_index}, {torch.cuda.get_device_name(device)}")
-                    except Exception:
-                        print(f"Using CUDA device: {device}")
-            elif TORCH_AVAILABLE and MPS_AVAILABLE:
-                device = torch.device("mps")
-                # MPS prefers float32; adjust dtype for compatibility
-                self.dtype = torch.float32
-                if self.verbose:
-                    backend_info = "(built)" if MPS_BUILT else "(runtime)"
-                    print(f"Using Apple GPU via MPS {backend_info} backend")
-            else:
-                device = torch.device("cpu")
-                if self.verbose:
-                    print("Using CPU.")
-            
-            self.device = device
-            return device
 
     def _clean_gpu_memory(self):
         """
@@ -310,42 +267,46 @@ class GPDenoiser:
                 except Exception as e:
                     if self.verbose:
                         print(f"Error occurred while cleaning MPS memory: {e}")
-    
+            # self._clean_model()
+            
     def _clean_model(self):
         """
-        Clean the model and likelihood attributes to free up GPU memory.
+        Clean GPU memory by moving everything to CPU.
+        This is the most reliable way to free GPU memory.
         """
-        for attr in ["x_train", "y_train", "noise_train", "x_predict", "noise_redict", 
-                     "model", "models", "likelihood", "likelihoods", "mll"]:
-            if hasattr(self, attr):
-                setattr(self, attr, None)
-            
-        # Now systematically search for and clean any tensor attributes
+        # Systematically move all GPU tensors and modules to CPU
         for attr_name in list(vars(self).keys()):
-            attr_val = getattr(self, attr_name)
-            
-            # Clean PyTorch tensors
-            if isinstance(attr_val, torch.Tensor) and (attr_val.device.type == 'cuda' or attr_val.device.type == 'mps'):
-                # Either set to None or move to CPU depending on size
-                if attr_val.numel() > 10000:  # Large tensors - just delete
-                    setattr(self, attr_name, None)
-                else:  # Small tensors - move to CPU
-                    try:
-                        setattr(self, attr_name, attr_val.cpu().clone().detach())
-                    except:
-                        setattr(self, attr_name, None)
-            
-            # Clean PyTorch modules
-            elif isinstance(attr_val, torch.nn.Module):
-                setattr(self, attr_name, None)
-            
-            # Clean lists or tuples that might contain tensors
-            elif isinstance(attr_val, (list, tuple)) and len(attr_val) > 0:
-                # Check if it contains tensors and clean if needed
-                if any(isinstance(item, torch.Tensor) for item in attr_val):
-                    setattr(self, attr_name, None)
+            try:
+                attr_val = getattr(self, attr_name)
+                
+                # Move PyTorch tensors to CPU
+                if isinstance(attr_val, torch.Tensor):
+                    if attr_val.device.type in ['cuda', 'mps']:
+                        setattr(self, attr_name, attr_val.cpu().detach())
+                
+                # Move PyTorch modules (models, likelihoods) to CPU
+                elif isinstance(attr_val, torch.nn.Module):
+                    attr_val.cpu()
+                
+                # Handle lists of tensors or modules
+                elif isinstance(attr_val, list) and len(attr_val) > 0:
+                    new_list = []
+                    for item in attr_val:
+                        if isinstance(item, torch.Tensor) and item.device.type in ['cuda', 'mps']:
+                            new_list.append(item.cpu().detach())
+                        elif isinstance(item, torch.nn.Module):
+                            item.cpu()
+                            new_list.append(item)
+                        else:
+                            new_list.append(item)
+                    if any(isinstance(item, (torch.Tensor, torch.nn.Module)) for item in attr_val):
+                        setattr(self, attr_name, new_list)
+            except Exception:
+                # If moving fails, continue to next attribute
+                continue
         
-        # Force garbage collection
+        # Force garbage collection multiple times
+        gc.collect()
         gc.collect()
         
         # Clean GPU cache thoroughly
@@ -353,9 +314,15 @@ class GPDenoiser:
             if torch.cuda.is_available():
                 try:
                     torch.cuda.empty_cache()
-                    torch.cuda.synchronize()
-                    torch.cuda.reset_peak_memory_stats()
-                    torch.cuda.reset_accumulated_memory_stats()
+                    # Use device-specific operations if available
+                    if hasattr(self, 'device') and hasattr(self.device, 'type') and self.device.type == 'cuda':
+                        torch.cuda.synchronize(device=self.device)
+                        torch.cuda.reset_peak_memory_stats(device=self.device)
+                        torch.cuda.reset_accumulated_memory_stats(device=self.device)
+                    else:
+                        torch.cuda.synchronize()
+                        torch.cuda.reset_peak_memory_stats()
+                        torch.cuda.reset_accumulated_memory_stats()
                 except Exception as e:
                     if self.verbose:
                         print(f"Error clearing CUDA memory: {e}")
@@ -1028,7 +995,7 @@ class GPDenoiser:
     
     def denoise_with_windows(self, window_size, overlap_factor=1):
         """
-        Perform GP denoising on overlapping windows with optional parallel processing.
+        Perform GP denoising on overlapping windows using sequential processing.
 
         Args:
             window_size (int): The size of each window for denoising.
@@ -1057,225 +1024,9 @@ class GPDenoiser:
         if self.estimate_lengthscale:
             self._estimate_lengthscale()
 
-        # Calculate number of windows
-        effective_step = window_size / overlap_factor
-        window_num = int(np.ceil((len(self.x_predict) - window_size) / effective_step)) + 1
+        # Use sequential processing only
+        return self._denoise_with_windows_sequential(window_size, overlap_factor, state0)
         
-        # Decide on processing method
-        if self.parallel_windows and window_num > 1:
-            print(f'GP denoising with {window_num} windows using parallel processing ({self.parallel_backend})')
-            
-            # Prepare window data
-            window_data_list = self._prepare_window_data(window_size, overlap_factor)
-            
-            # Choose parallel processing method
-            if self.parallel_backend == 'joblib':
-                results = self._process_windows_joblib(window_data_list)
-            elif self.parallel_backend == 'multiprocessing':
-                results = self._process_windows_multiprocessing(window_data_list)
-            elif self.parallel_backend == 'threading':
-                results = self._process_windows_threading(window_data_list)
-            else:
-                print(f"Unknown parallel backend '{self.parallel_backend}', falling back to sequential processing")
-                return self._denoise_with_windows_sequential(window_size, overlap_factor, state0)
-            
-            # Combine results
-            return self._combine_window_results(results, state0)
-        
-        else:
-            # Sequential processing (original method)
-            return self._denoise_with_windows_sequential(window_size, overlap_factor, state0)
-        
-    def _process_single_window(self, window_data):
-        """
-        Process a single window independently - designed for parallel processing.
-        
-        Args:
-            window_data (dict): Contains all data needed for one window
-        
-        Returns:
-            dict: Results from processing this window
-        """
-        # Extract data from the dictionary
-        x_train_window = window_data['x_train']
-        y_train_window = window_data['y_train'] 
-        noise_train_window = window_data['noise_train']
-        x_predict_window = window_data['x_predict']
-        noise_predict_window = window_data['noise_predict']
-        crop_indices = window_data['crop_indices']
-        denoiser_state = window_data['denoiser_state']
-        
-        # Create a new denoiser instance for this process
-        denoiser = GPDenoiser()
-        denoiser.restore_state(denoiser_state)
-        denoiser.use_gpu = self.use_gpu
-        
-        try:
-            # Initialize data for this window
-            denoiser.initialize_training_data(
-                x_train_window, y_train_window, noise_train_window,
-                x_predict_window, noise_predict_window
-            )
-            
-            # Train and predict
-            denoiser.train()
-                
-            y_denoised, y_error, y_noise = denoiser.predict()
-            lengthscale = denoiser._get_lengthscale()
-            
-            # Clean GPU
-            denoiser._clean_gpu_memory()
-            
-            # Convert to numpy and return results
-            return {
-                'crop_indices': crop_indices,
-                'y_denoised': y_denoised.cpu().numpy() if hasattr(y_denoised, 'cpu') else y_denoised,
-                'y_error': y_error.cpu().numpy() if hasattr(y_error, 'cpu') else y_error,
-                'y_noise': y_noise.cpu().numpy() if hasattr(y_noise, 'cpu') else y_noise,
-                'lengthscale': lengthscale if isinstance(lengthscale, (int, float)) else lengthscale[0],
-                'success': True
-            }
-        except Exception as e:
-            print(f"Error processing window {crop_indices}: {e}")
-            return {
-                'crop_indices': crop_indices,
-                'y_denoised': None,
-                'y_error': None,
-                'y_noise': None,
-                'lengthscale': None,
-                'success': False,
-                'error': str(e)
-            }
-
-    def _prepare_window_data(self, window_size, overlap_factor):
-        """
-        Prepare window data for parallel processing.
-        
-        Returns:
-            list: List of window data dictionaries
-        """
-        # Calculate windows
-        effective_step = window_size / overlap_factor
-        window_num = int(np.ceil((len(self.x_predict) - window_size) / effective_step)) + 1
-        
-        window_data_list = []
-        for n in range(window_num):
-            step_size = int(window_size / overlap_factor)
-            crop_start = max(n * step_size, 0)
-            crop_end = min(crop_start + window_size, len(self.x_predict))
-            crop = slice(crop_start, crop_end)
-            
-            # Extract data for this window
-            x_predict_window = self.x_predict[crop]
-            noise_predict_window = self.noise_predict[crop, :]
-            
-            # Find corresponding training data
-            x_predict_min, x_predict_max = x_predict_window[0].item(), x_predict_window[-1].item()
-            crop_train = (self.x_train >= x_predict_min) & (self.x_train <= x_predict_max)
-            
-            window_data = {
-                'x_train': self.x_train[crop_train].cpu().numpy(),
-                'y_train': self.y_train[crop_train, :].cpu().numpy(),
-                'noise_train': self.noise_train[crop_train, :].cpu().numpy(),
-                'x_predict': x_predict_window.cpu().numpy(),
-                'noise_predict': noise_predict_window.cpu().numpy(),
-                'crop_indices': (crop_start, crop_end),
-                'denoiser_state': self._get_current_state()
-            }
-            window_data_list.append(window_data)
-        
-        return window_data_list
-
-    def _combine_window_results(self, results, state0):
-        """
-        Combine results from parallel window processing.
-        
-        Args:
-            results (list): List of result dictionaries from parallel processing
-            state0 (dict): Original denoiser state to restore
-        
-        Returns:
-            tuple: Combined results (y_stitched, error_stitched, noise_stitched, lengthscales)
-        """
-        # Initialize output arrays
-        y_stitched = np.zeros([self.x_predict.shape[0], self.y_train0.shape[1]])
-        noise_stitched = np.zeros([self.x_predict.shape[0], self.y_train0.shape[1]])
-        error_stitched = np.zeros([self.x_predict.shape[0], self.y_train0.shape[1]])
-        weights = np.zeros([self.x_predict.shape[0], self.y_train0.shape[1]])
-        lengthscales = np.zeros([self.x_predict.shape[0]])
-        
-        # Combine results
-        for result in results:
-            if not result['success']:
-                print(f"Skipping failed window {result['crop_indices']}: {result.get('error', 'Unknown error')}")
-                continue
-                
-            crop_start, crop_end = result['crop_indices']
-            crop = slice(crop_start, crop_end)
-            
-            y_stitched[crop, :] += result['y_denoised']
-            noise_stitched[crop, :] += result['y_noise']
-            error_stitched[crop, :] += result['y_error']
-            lengthscales[crop] += result['lengthscale']
-            weights[crop, :] += 1
-        
-        # Blend overlapping regions
-        y_stitched, noise_stitched, error_stitched = blend_overlapping_windows(
-            y_stitched, weights, noise_stitched, error_stitched)
-        
-        # Undo normalization
-        if self.normalize_training_data:
-            self.denormalize_data()
-            y_stitched, error_stitched, noise_stitched = self.denormalize(
-                y_stitched, error_stitched, noise_stitched)
-        
-        # Fill gaps using interpolation
-        missing_mask = weights == 0
-        if missing_mask.any():
-            x_valid = self.x_predict[~missing_mask].cpu().numpy()
-            x_missing = self.x_predict[missing_mask].cpu().numpy()
-            
-            if len(x_valid) > 0:  # Only interpolate if we have valid data
-                f_y = interp1d(x_valid, y_stitched[~missing_mask, :], kind='slinear', 
-                            fill_value='extrapolate', bounds_error=False)
-                f_noise = interp1d(x_valid, noise_stitched[~missing_mask, :], kind='slinear', 
-                                fill_value='extrapolate', bounds_error=False)
-                f_error = interp1d(x_valid, error_stitched[~missing_mask, :], kind='slinear', 
-                                fill_value='extrapolate', bounds_error=False)
-                
-                y_stitched[missing_mask, :] = f_y(x_missing)
-                noise_stitched[missing_mask, :] = f_noise(x_missing)
-                error_stitched[missing_mask, :] = f_error(x_missing)
-        
-        # Restore state
-        self.restore_state(state0)
-        
-        return y_stitched, error_stitched, noise_stitched, lengthscales
-
-    
-
-    def _process_windows_joblib(self, window_data_list):
-        """Process windows using joblib parallel processing."""
-        with joblib.parallel_backend('loky', n_jobs=self.max_workers):
-            results = Parallel()(
-                delayed(self._process_single_window)(window_data) 
-                for window_data in window_data_list
-            )
-        return results
-
-    def _process_windows_multiprocessing(self, window_data_list):
-        """Process windows using multiprocessing."""
-        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
-            results = list(executor.map(self._process_single_window, window_data_list))
-        return results
-
-    def _process_windows_threading(self, window_data_list):
-        """Process windows using threading (good for I/O bound operations)."""
-        with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
-            results = list(executor.map(self._process_single_window, window_data_list))
-        return results
-
-
 
     def _denoise_with_windows_sequential(self, window_size, overlap_factor, state0):
         """Original sequential window processing method."""

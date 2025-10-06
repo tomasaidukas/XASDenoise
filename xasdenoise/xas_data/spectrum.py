@@ -14,7 +14,7 @@ class Spectrum:
         self,
         energy: np.ndarray,
         spectrum: np.ndarray,
-        metadata: Optional[Dict] = {},
+        metadata: Optional[Dict] = None,
         I0: Optional[np.ndarray] = None,
         I1: Optional[np.ndarray] = None,
         background: Optional[np.ndarray] = None,
@@ -59,6 +59,20 @@ class Spectrum:
         
         # Metadata dictionary
         self.metadata = metadata
+        if metadata is None:
+            self.metadata = {}
+            self.metadata.setdefault('edge_step_func', 'tanh')
+            self.metadata.setdefault('pre_edge_min_E', -np.inf)  # in eV relative to edge
+            self.metadata.setdefault('pre_edge_max_E', self.energy[0]-30)  # in eV relative to edge
+            self.metadata.setdefault('pre_edge_fit_func', 'V')  # in eV relative to edge
+            self.metadata.setdefault('post_edge_min_E', 30)  # in eV relative to edge
+            self.metadata.setdefault('post_edge_max_E', np.inf)  # in eV relative to edge
+            self.metadata.setdefault('post_edge_fit_func', 'V')  # in eV relative to edge
+            
+            self.metadata.setdefault('compound', None)
+            self.metadata.setdefault('element', None)
+            self.metadata.setdefault('edge_type', None)
+            
         
         # Populate metadata using xraydb if available
         self.populate_metadata()
