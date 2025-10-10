@@ -40,28 +40,55 @@ def compute_mu(data):
     """
     data.compute_mu()
 
-def remove_bad_time_instances(data):
+def remove_bad_time_instances(data, outlier_factor=3.0):
     """
-    Identify and remove time instances with bad data (e.g., high noise).
-
+    Identify and remove time instances with bad data using robust outlier detection.
+    
     Args:
         data (Spectrum): A Spectrum object containing the spectrum data.
+        outlier_factor (float): Factor for outlier threshold. Higher = less sensitive. Default: 3.0.
 
     Returns:
         None
     """
-    y = data.spectrum
-    if y.shape[1] <= 1:
+    spectrum = data.spectrum
+    if spectrum.shape[1] <= 1:
         print('remove_bad_time_instances() requires a time series spectrum with more than 1 time instance. Skipping.')
         return
 
-    I = np.sum(abs(y) ** 2, axis=0)
-    thresh = np.median(I) * 1.2
-    indices = np.where(I > thresh)[0]
-
-    if indices.size > 0:
-        print(f"Deleting time indices {indices[0]} to {indices[-1]} out of {y.shape[1]} for {data.metadata['compound']}")
-        data.delete_time_indices(indices)
+    n_times = spectrum.shape[1]
+    time_avg = np.mean(spectrum, axis=1, keepdims=True)
+    residuals = spectrum - time_avg
+    
+    # Use sum of absolute values instead of squared (more robust to outliers)
+    deviation_scores = np.sum(np.abs(residuals), axis=0)
+    
+    # Use IQR-based threshold instead of simple median multiplier
+    q75, q25 = np.percentile(deviation_scores, [75, 25])
+    iqr = q75 - q25
+    
+    if iqr > 0:
+        threshold = q75 + outlier_factor * iqr  # Tukey's method
+        bad_mask = deviation_scores > threshold
+    else:
+        print("No variation in time instances detected.")
+        return
+    
+    bad_indices = np.where(bad_mask)[0]
+    
+    # Safety check: don't remove more than 50% of data
+    if len(bad_indices) > n_times // 2:
+        print(f"Warning: Would remove {len(bad_indices)} out of {n_times} instances. Limiting to worst {n_times//2}.")
+        # Keep only the worst outliers
+        worst_scores = deviation_scores[bad_indices]
+        worst_order = np.argsort(worst_scores)[::-1]
+        bad_indices = bad_indices[worst_order[:n_times//2]]
+    
+    if len(bad_indices) > 0:
+        print(f"Removing {len(bad_indices)} bad time instances: {bad_indices} out of {n_times} for {data.metadata.get('compound', 'unknown')}")
+        data.delete_time_indices(bad_indices)
+    else:
+        print("No bad time instances detected.")
 
 def remove_nans(data):
     """
@@ -114,26 +141,17 @@ def center_edge(data):
     """
 
     # Find the rising edge midpoint from the XAS background
-    if data.background is None:
-        data.compute_background()
+    background = estimate_background(data, save_background=False)
+    if background.ndim == 1:
+        background = background[:, np.newaxis]
         
     # Find the midpoint of the background
-    background_avg = np.mean(data.background, axis=1)
+    background_avg = np.mean(background, axis=1)
     midpoint_value = (background_avg.max() + background_avg.min()) / 2
     edge_idx = np.argmin(np.abs(background_avg - midpoint_value))
     new_edge = data.energy[edge_idx]
     data.metadata["edge"] = new_edge
     
-    # plt.figure()
-    # plt.plot(data.energy, background_avg)
-    # plt.plot(data.energy, data.spectrum.mean(axis=1))
-    # plt.axvline(data.edge, color='r', linestyle='--', label='old edge')
-    # plt.axvline(new_edge, color='g', linestyle='--', label='new edge')
-    # plt.title(f"Edge centering: old edge = {data.edge:.2f} eV, new edge = {new_edge:.2f} eV")
-    # plt.xlabel('Energy (eV)')
-    # plt.legend()
-    # plt.show()
-    # asdasdas
 
 def find_glitches(data, threshold=95, glitch_matching=True, split_data=False, glitch_refinement_fit=False, 
                   glitch_fit_window=None, glitch_width_scaling=1, group_glitches=False, plot=False, 
@@ -352,7 +370,7 @@ def normalize_spectrum(data, reference=None, fitting_funcs=['1','V'], fit_indivi
     
     data.edge_step = edge_step
     
-def estimate_background(data):
+def estimate_background(data, save_background=True):
     """
     Estimate the background of an XAS spectrum using pre-edge and post-edge fits.
 
@@ -381,7 +399,9 @@ def estimate_background(data):
     
     # TODO: here it is assumed that the spectrum is normalized
     background = baseline_estimation.fit_edge_step(x_fit, y_fit, edge, robust_fit=False, step_function=edge_step_func)
-    data.background = background
+    
+    if save_background:
+        data.background = background
     
     return background
 

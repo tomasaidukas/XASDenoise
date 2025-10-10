@@ -376,15 +376,10 @@ class DenoisingPipeline:
             
             # Get baseline for k-space plotting
             try:
-                if hasattr(self.spectrum_obj, 'background') and self.spectrum_obj.background is not None:
-                    baseline = self.spectrum_obj.background
-                    if baseline.ndim == 1:
-                        baseline = baseline[:, np.newaxis]
-                else:
-                    # Estimate baseline
-                    baseline = baseline_estimation.fit_edge_step(
-                        x_data, np.mean(y_denoised, axis=1), edge_energy
-                    )[:, np.newaxis]
+                # Estimate baseline
+                baseline = baseline_estimation.fit_edge_step(
+                    x_data, np.mean(y_denoised, axis=1), edge_energy,
+                )[:, np.newaxis]
             except:
                 baseline = np.zeros_like(y_denoised[:, 0:1])
             

@@ -44,6 +44,7 @@ class DataWarper:
         )
         
         self.interpolator = DataInterpolator(
+            config=config,
             method=config.get('warping_interpolation_method'),
             interpolation_kind=config.get('output_warping_interpolation', 'linear'),
             num_points=config.get('warping_interpolation_num_points'),

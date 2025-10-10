@@ -105,10 +105,8 @@ class SmoothnessEstimator:
         # Initial preprocessing
         y_preprocessed = self.preprocess_for_smoothness(x, y_avg)
         
-        # Get window sizes
-        windows = self.get_smoothness_windows(x)
-        
-        # Initial smoothness estimation
+            # Initial smoothness estimation
+        windows = self.get_smoothness_windows(x)        
         _, smoothness = smoothness_estimation(
             x, y_preprocessed, windows['initial_polyfit'], windows['initial_smooth']
         )
@@ -119,10 +117,22 @@ class SmoothnessEstimator:
             if self.verbose >= 1:
                 print(f"Smoothness refinement iteration {iteration + 1}/{num_iterations}")
             
-            smoothness = self.refine_smoothness_iteration(
-                x, y_avg, noise, smoothness, edge_energy, windows, denoiser
+            # store the denoiser state
+            denoiser_state = self.setup_denoiser_for_iteration(denoiser)
+            
+            # Process data through temporary warping and denoising
+            y_denoised = self._process_temp_pipeline(
+                x, y_avg, noise, smoothness, edge_energy, denoiser
             )
-        
+            
+            # Estimate new smoothness from denoised data
+            _, smoothness = smoothness_estimation(
+                x, y_denoised, windows['refined_polyfit'], windows['refined_smooth']
+            )
+            
+            # Restore denoiser state
+            self.restore_denoiser_state(denoiser, denoiser_state)
+            
         if self.verbose >= 2:
             self.plot_smoothness_results(x, smoothness, 'Iterative smoothness estimation')
         
@@ -162,34 +172,6 @@ class SmoothnessEstimator:
             'refined_smooth': self.ev_to_points(x, self.config.get('smoothness_smooth_window', 11), values_in_ev)
         }
     
-    def refine_smoothness_iteration(self, x: np.ndarray, y_avg: np.ndarray, 
-                                   noise: np.ndarray, current_smoothness: np.ndarray,
-                                   edge_energy: float, windows: Dict[str, int], 
-                                   denoiser) -> np.ndarray:
-        """Perform one iteration of smoothness refinement."""
-            
-        # Setup denoiser state
-        denoiser_state = self.setup_denoiser_for_iteration(denoiser)
-        
-        try:
-            # Create temporary warper for iteration
-            temp_warper = self.create_temp_warper_for_iteration()
-            
-            # Process data through warping and denoising
-            y_denoised = self.process_temp_iteration(
-                temp_warper, x, y_avg, noise, current_smoothness, edge_energy, denoiser
-            )
-            
-            # Estimate new smoothness from denoised data
-            _, new_smoothness = smoothness_estimation(
-                x, y_denoised, windows['refined_polyfit'], windows['refined_smooth']
-            )
-            return new_smoothness
-            
-        finally:
-            # Restore denoiser state
-            self.restore_denoiser_state(denoiser, denoiser_state)
-    
     def setup_denoiser_for_iteration(self, denoiser):
         """Setup denoiser for smoothness iteration."""
         try:
@@ -218,24 +200,39 @@ class SmoothnessEstimator:
             except:
                 pass
     
-    def create_temp_warper_for_iteration(self):
-        """Create temporary warper configuration for iteration."""
+    def _process_temp_pipeline(self, x: np.ndarray, y_avg: np.ndarray,
+                               noise: np.ndarray, smoothness: np.ndarray, 
+                               edge_energy: float, denoiser) -> np.ndarray:
+        """
+        Process temporary pipeline to get denoised data.
+        
+        Args:
+            x: Energy array
+            y_avg: Average spectrum data
+            noise: Noise estimates
+            smoothness: Smoothness estimates
+            edge_energy: Energy for warping operations
+            denoiser: Denoiser object
+            
+        Returns:
+            np.ndarray: Denoised data
+        """
         # Import here to avoid circular imports
         from .stationarity_warping import DataWarper
         
+        # Create temporary warper configuration
         temp_config = self.config.copy()
         
         # Modify configuration for iteration
-        if temp_config.get('warping_interpolation_method') in ['upsample', 'same']:
+        # if temp_config.get('warping_interpolation_method') in ['upsample', 'same']:
+        #     temp_config['warping_interpolation_method'] = 'downsample'
+        
+        if self.config.get('smoothness_use_simple_denoiser'):
             temp_config['warping_interpolation_method'] = 'downsample'
-        
-        return DataWarper(temp_config)
-    
-    def process_temp_iteration(self, temp_warper, x: np.ndarray, y_avg: np.ndarray,
-                               noise: np.ndarray, smoothness: np.ndarray, 
-                               edge_energy: float, denoiser) -> np.ndarray:
-        """Process data through temporary warping and denoising."""
-        
+            
+        temp_warper = DataWarper(temp_config)
+       
+
         # Setup temporary data
         noise_avg = np.mean(noise, axis=1)[:, None]
         
@@ -271,17 +268,18 @@ class SmoothnessEstimator:
         )
         
         downsampling_method = self.config.get('smoothness_downsampling_method')
-        downsampling_pts=self.config.get('smoothness_downsampling_pts')
+        downsampling_pts = self.config.get('smoothness_downsampling_pts')
         if downsampling_method is None:
-            downsampling_pts=self.config.get('downsampling_pts', 1000)
+            downsampling_pts = self.config.get('downsampling_pts', 1000)
             downsampling_method = self.config.get('data_downsampling_method')
+        
         y_denoised, _, _ = denoiser.denoise_with_downsampling(
-            downsampling_pts=self.config.get('smoothness_downsampling_pts', 1000),
+            downsampling_pts=downsampling_pts,
             downsampling_method=downsampling_method,
             smoothness=smoothness_masked
         )
         
-        # Handle masked regions
+        # Handle masked regions for specific methods
         if (self.config.get('input_warping_method') == 'kspace_exafs_smoothness_xanes' and 
             data_mask_warped is not None):
             y_denoised[~data_mask_warped] = 0

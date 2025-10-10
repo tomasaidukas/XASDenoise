@@ -30,11 +30,12 @@ def estimate_smoothness(x, y, polyfit_len=51, smooth_len=20):
     y_windows = sliding_window_view(y, polyfit_len, axis=0).T
     x_windows = np.arange(polyfit_len)
     
-    poly_deg = np.max([np.min([2, polyfit_len-1]), 1])
+    poly_deg_min = 2
+    poly_deg = np.max([np.min([poly_deg_min, polyfit_len-1]), 1])
     fit_coeff = np.polyfit(x_windows, y_windows, deg=poly_deg)
     hessian = fit_coeff[0, :]
     
-    win_len = np.max([np.min([5, polyfit_len]), 2])
+    win_len = np.max([np.min([5, polyfit_len]), 3])
     hessian = median_filter(hessian, win_len)
 
     pad = x.shape[0] - hessian.shape[0]

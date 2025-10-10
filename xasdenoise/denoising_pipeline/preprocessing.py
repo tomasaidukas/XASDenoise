@@ -268,7 +268,10 @@ class DataPreprocessor:
             
             # Apply smoothing if requested
             if self.config.get('noise_estimation_smoothing', True):
-                smooth_win = len(x) // 5
+                smooth_win = self.config.get('noise_estimation_smoothing_window', None)
+                if smooth_win is None:
+                    smooth_win = len(x) // 5
+                    
                 noise_estimate = uniform_filter1d(
                     noise_estimate**2, smooth_win, mode="nearest", axis=0
                 )**0.5

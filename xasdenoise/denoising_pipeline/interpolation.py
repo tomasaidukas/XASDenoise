@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numba
 from scipy.interpolate import interp1d
 from scipy.spatial import cKDTree
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple, Union, Dict, Any
 
 
 class DataInterpolator:
@@ -22,7 +22,8 @@ class DataInterpolator:
     required by many denoising algorithms.
     """
     
-    def __init__(self, method: Optional[str] = None, 
+    def __init__(self,  config: Dict[str, Any],
+                 method: Optional[str] = None, 
                  interpolation_kind: str = 'linear',
                  num_points: Optional[int] = None,
                  verbose: int = 0):
@@ -35,6 +36,7 @@ class DataInterpolator:
             num_points: Override number of points for interpolation
             verbose: Verbosity level (0=quiet, 1=basic info, 2=detailed with plots)
         """
+        self.config = config
         self.method = method
         self.interpolation_kind = interpolation_kind
         self.num_points = num_points
@@ -61,33 +63,41 @@ class DataInterpolator:
         if self.method is None:
             # No interpolation - keep original grid
             self.x_uniform = x_warped.copy()
-            target_points = len(x_warped)
+            interpolation_target_points = len(x_warped)
             
         elif self.method.lower() == 'downsample':
             # Downsample based on maximum meaningful spacing (excluding gaps)
             max_dist = self._get_max_meaningful_distance(x_warped)
             self.window_width = max_dist
-            target_points = int((x_warped.max() - x_warped.min()) / max_dist) if self.num_points is None else self.num_points
-            self.x_uniform = np.linspace(x_warped.min(), x_warped.max(), target_points)
+            interpolation_target_points = self.config.get('interpolation_target_points', None)
+            if interpolation_target_points is None:
+                interpolation_target_points = int((x_warped.max() - x_warped.min()) / max_dist) if self.num_points is None else self.num_points
+            self.x_uniform = np.linspace(x_warped.min(), x_warped.max(), interpolation_target_points)
             
         elif self.method.lower() == 'upsample':
             # Upsample based on minimum meaningful spacing
             min_dist = self._get_min_meaningful_distance(x_warped)
             self.window_width = min_dist
-            target_points = int((x_warped.max() - x_warped.min()) / min_dist) if self.num_points is None else self.num_points
-            self.x_uniform = np.linspace(x_warped.min(), x_warped.max(), target_points)
+            interpolation_target_poinxts = self.config.get('interpolation_target_points', None)
+            if interpolation_target_points is None:
+                interpolation_target_points = int((x_warped.max() - x_warped.min()) / min_dist) if self.num_points is None else self.num_points
+            self.x_uniform = np.linspace(x_warped.min(), x_warped.max(), interpolation_target_points)
             
         elif self.method.lower() == 'same':
             # Same number of points as input
-            target_points = len(x_warped) if self.num_points is None else self.num_points
-            self.window_width = 1 / target_points
-            self.x_uniform = np.linspace(x_warped.min(), x_warped.max(), target_points)
+            interpolation_target_points = self.config.get('interpolation_target_points', None)
+            if interpolation_target_points is None:
+                interpolation_target_points = len(x_warped) if self.num_points is None else self.num_points
+            self.window_width = 1 / interpolation_target_points
+            self.x_uniform = np.linspace(x_warped.min(), x_warped.max(), interpolation_target_points)
             
-        elif self.method.lower() == 'optimized':
+        elif self.method.lower() == 'optimize':
             # Optimized grid based on data distribution
             self.x_uniform = self._create_optimized_grid(x_warped)
-            target_points = len(self.x_uniform)
-            self.window_width = 1 / target_points
+            interpolation_target_points = self.config.get('interpolation_target_points', None)
+            if interpolation_target_points is None:
+                interpolation_target_points = len(self.x_uniform)
+            self.window_width = 1 / interpolation_target_points
             
         else:
             raise ValueError(f"Unknown interpolation method: {self.method}")

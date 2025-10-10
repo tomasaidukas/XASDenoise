@@ -63,7 +63,7 @@ class Spectrum:
             self.metadata = {}
             self.metadata.setdefault('edge_step_func', 'tanh')
             self.metadata.setdefault('pre_edge_min_E', -np.inf)  # in eV relative to edge
-            self.metadata.setdefault('pre_edge_max_E', self.energy[0]-30)  # in eV relative to edge
+            self.metadata.setdefault('pre_edge_max_E', -30)  # in eV relative to edge
             self.metadata.setdefault('pre_edge_fit_func', 'V')  # in eV relative to edge
             self.metadata.setdefault('post_edge_min_E', 30)  # in eV relative to edge
             self.metadata.setdefault('post_edge_max_E', np.inf)  # in eV relative to edge

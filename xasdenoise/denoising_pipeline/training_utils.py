@@ -318,6 +318,7 @@ def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, m
         'kernel_size': encoder_kwargs.get('kernel_size', 11),
         'dropout_rate': encoder_kwargs.get('dropout_rate', 0),
         'channels': encoder_kwargs.get('channels', None),
+        'normalization_method': encoder_kwargs.get('normalization_method', None),
     }
     
     # Training parameters with defaults

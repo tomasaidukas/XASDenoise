@@ -26,10 +26,11 @@ class PipelineConfig:
     
     # Noise estimation settings
     noise_estimation_mode: int = 1
-    noise_crop_region: np.ndarray = field(default_factory=lambda: np.arange(0, 100))  # eV
+    noise_crop_region: np.ndarray = field(default_factory=lambda: np.arange(0, 100))
     noise_window: float = 3  # eV
     noise_estimation_smoothing: bool = True
     noise_polyfit_degree: int = 1  # Degree of polynomial for noise estimation within each sliding window
+    noise_estimation_smoothing_window: Optional[int] = None  # window size for smoothing the noise estimate
     
     # Data scaling settings
     apply_data_mask: Union[str, bool] = False
@@ -43,6 +44,7 @@ class PipelineConfig:
     output_warping_interpolation: Optional[str] = 'linear'  # 'linear', 'nearest', 'cubic'
     warping_interpolation_method: Optional[str] = 'downsample'  # None, 'downsample', 'upsample', 'same'
     warping_interpolation_num_points: Optional[int] = None  # override interpolation points
+    interpolation_target_points: Optional[np.ndarray] = None  # target points for interpolation, if None, will be determined based on data range and warping_interpolation_num_points
     
     # ============ Smoothness Estimation Parameters ============
     smoothness_est_iter: int = 5
@@ -127,6 +129,8 @@ class PipelineConfig:
             'noise_crop_region': self.noise_crop_region,
             'noise_window': self.noise_window,
             'noise_estimation_smoothing': self.noise_estimation_smoothing,
+            'noise_estimation_smoothing_window': self.noise_estimation_smoothing_window,
+            'noise_polyfit_degree': self.noise_polyfit_degree,
             'apply_data_mask': self.apply_data_mask,
             'values_in_ev': self.values_in_ev,
             'verbose': self.verbose
@@ -140,6 +144,7 @@ class PipelineConfig:
             'output_warping_interpolation': self.output_warping_interpolation,
             'warping_interpolation_method': self.warping_interpolation_method,
             'warping_interpolation_num_points': self.warping_interpolation_num_points,
+            'interpolation_target_points': self.interpolation_target_points,
             'smoothness_est_iter': self.smoothness_est_iter,
             'smoothness_polyfit_window0': self.smoothness_polyfit_window0,
             'smoothness_polyfit_window': self.smoothness_polyfit_window,
@@ -174,6 +179,7 @@ class PipelineConfig:
             'output_warping_interpolation': self.output_warping_interpolation,
             'warping_interpolation_method': self.warping_interpolation_method,
             'warping_interpolation_num_points': self.warping_interpolation_num_points,
+            'interpolation_target_points': self.interpolation_target_points,
             'baseline_removal': self.data_baseline_removal,
             'baseline_fitting_funcs': self.baseline_fitting_funcs,
             'noise_estimation_mode': self.noise_estimation_mode,
