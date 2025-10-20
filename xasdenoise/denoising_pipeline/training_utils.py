@@ -274,7 +274,7 @@ def _pad_arrays_to_same_length(x0, y_train0, y_target0, data_mask0, edges0):
     return x0, y_train0, y_target0, data_mask0
 
 def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, method='noise2noise',
-                        model_path=None, **encoder_kwargs):
+                        model_params=None, training_params=None):
     """
     Prepare training data and train the encoder model.
     
@@ -284,19 +284,7 @@ def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, m
         denoiser_preproc (Denoiser): Denoiser object for denoising the data during preprocessing.
         method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
         model_path (str): Path to save the trained model.
-        **encoder_kwargs: Additional arguments for EncoderDenoiser and training. Supported keys:
-            - model_type (str): Default 'conv'
-            - device (str): Default 'auto'
-            - gpu_index (int): Default None
-            - num_layers (int): Default 4
-            - kernel_size (int): Default 11
-            - dropout_rate (float): Default 0
-            - channels (int): Default None
-            - batch_size (int): Default 16
-            - epochs (int): Default 100
-            - learning_rate (float): Default 1e-4
-            - remove_padded_regions (bool): Default False
-            - augment_data (bool): Default False
+        training_params (dict): Dictionary of training parameters.
         
     Returns:
         EncoderModel: Trained encoder model.
@@ -311,26 +299,31 @@ def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, m
 
     # Model initialization parameters with defaults
     model_params = {
-        'model_type': encoder_kwargs.get('model_type', 'conv'),
-        'device': encoder_kwargs.get('device', 'auto'),
-        'gpu_index': encoder_kwargs.get('gpu_index', None),
-        'num_layers': encoder_kwargs.get('num_layers', 4),
-        'kernel_size': encoder_kwargs.get('kernel_size', 11),
-        'dropout_rate': encoder_kwargs.get('dropout_rate', 0),
-        'channels': encoder_kwargs.get('channels', None),
-        'normalization_method': encoder_kwargs.get('normalization_method', None),
+        'model_type': model_params.get('model_type', 'conv'),
+        'device': model_params.get('device', 'auto'),
+        'gpu_index': model_params.get('gpu_index', None),
+        'num_layers': model_params.get('num_layers', 4),
+        'kernel_size': model_params.get('kernel_size', 11),
+        'dropout_rate': model_params.get('dropout_rate', 0),
+        'channels': model_params.get('channels', None),
+        'normalization_method': model_params.get('normalization_method', None),
+        'bias': model_params.get('bias', False)
     }
     
     # Training parameters with defaults
     training_params = {
-        'batch_size': encoder_kwargs.get('batch_size', 16),
-        'num_epochs': encoder_kwargs.get('epochs', 100),
-        'learning_rate': encoder_kwargs.get('learning_rate', 1e-4),
-        'augment_data': encoder_kwargs.get('augment_data', False),
-        'remove_padded_regions': encoder_kwargs.get('remove_padded_regions', False),
-        'save_path': model_path,
-        'early_stopping_patience': encoder_kwargs.get('early_stopping_patience', 50),
-        'weight_decay': encoder_kwargs.get('weight_decay', 1e-5),
+        'batch_size': training_params.get('batch_size', 16),
+        'num_epochs': training_params.get('num_epochs', 100),
+        'learning_rate': training_params.get('learning_rate', 1e-4),
+        'augment_data': training_params.get('augment_data', False),
+        'remove_padded_regions': training_params.get('remove_padded_regions', False),
+        'save_path': training_params.get('save_path', None),
+        'early_stopping_patience': training_params.get('early_stopping_patience', 50),
+        'weight_decay': training_params.get('weight_decay', 1e-5),
+        'loss_weights': training_params.get('loss_weights', None),
+        'temporal_smoothness_lambda': training_params.get('temporal_smoothness_lambda', 0.0),
+        'static_region_mask': training_params.get('static_region_mask', None),
+        'static_region_weight': training_params.get('static_region_weight', 1.0),
     }
 
     # Define model type and initialize the denoiser
@@ -344,7 +337,7 @@ def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, m
         **training_params
     )
 
-    return denoiser
+    return denoiser, training_metrics
 
 
 # def split_training_data(x0, y_train0, y_target0, data_mask0, compounds0, elements0, 

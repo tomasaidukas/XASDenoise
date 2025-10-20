@@ -128,9 +128,12 @@ class DataWarper:
         
         # Visualize warping results if verbosity is high enough
         if self.verbose >= 2:
-            self.visualize_warping(x, y, x_warped, y, 
-                                 title=f"Stationarity Warping: {self.config.get('input_warping_method')}")
-        
+            if callable(self.config.get('input_warping_method')):
+                title = "Stationarity Warping: Custom Function"
+            else:
+                title = f"Stationarity Warping: {self.config.get('input_warping_method')}"
+            self.visualize_warping(x, y, x_warped, y, title=title)
+
         # Step 2: Initialize interpolation onto uniform grid (if needed)
         self.interpolator.initialize(x_warped)
         x_uniform = self.interpolator.get_uniform_grid()
@@ -202,8 +205,11 @@ class DataWarper:
         if self.verbose >= 2:
             # Get the uniform grid for comparison
             x_uniform = self.interpolator.get_uniform_grid()
-            self.visualize_warping(x_uniform, y, x_original, y_warped, 
-                                 title=f"Unwarping Results: {self.config.get('input_warping_method')}")
+            if callable(self.config.get('input_warping_method')):
+                title = "Unwrapping Results: Custom Function"
+            else:
+                title=f"Unwrapping Results: {self.config.get('input_warping_method')}"
+            self.visualize_warping(x_uniform, y, x_original, y_warped, title=title)
         
         return x_original, y_warped, y_error_warped, noise_warped
         

@@ -284,3 +284,114 @@ class NormFit:
         xregion = x[crop_idx]
         yregion = y[crop_idx]
         return xregion, yregion, crop_idx
+
+    def reconstruct_fit(self, x, fit_params, fit_func):
+        """
+        Reconstruct polynomial fits from stored parameters.
+        
+        Args:
+            x (np.ndarray): Energy values.
+            fit_params (np.ndarray): Fitted polynomial parameters.
+            fit_func (str): Type of fit function used.
+            
+        Returns:
+            np.ndarray: Reconstructed fit values.
+        """
+        if fit_func in ['0', '0.0']:
+            return Polynomials.constant(x, *fit_params)
+        elif fit_func in ['1', '1.0']:
+            return Polynomials.linear(x, *fit_params)
+        elif fit_func in ['2', '2.0']:
+            return Polynomials.quadratic(x, *fit_params)
+        elif fit_func in ['3', '3.0']:
+            return Polynomials.cubic(x, *fit_params)
+        elif fit_func in ['4', '4.0']:
+            return Polynomials.quartic(x, *fit_params)
+        elif fit_func == 'V':
+            return Polynomials.victoreen(x, *fit_params)
+        else:
+            # Default to linear if function type is unknown
+            return Polynomials.linear(x, *fit_params[:2])
+
+    def undo_normalization(self, x, normalized_spectrum, normalization_params):
+        """
+        Reconstruct unnormalized spectrum from normalized data using stored parameters.
+        
+        Args:
+            x (np.ndarray): Energy values.
+            normalized_spectrum (np.ndarray): Normalized spectrum data.
+            normalization_params (dict): Dictionary containing normalization parameters.
+            
+        Returns:
+            np.ndarray: Reconstructed unnormalized spectrum.
+            
+        Raises:
+            ValueError: If required normalization parameters are missing.
+        """
+        if not isinstance(normalization_params, dict):
+            raise ValueError("normalization_params must be a dictionary")
+            
+        required_keys = ['edge', 'pre_edge_region_params', 'post_edge_region_params', 'fit_individual']
+        for key in required_keys:
+            if key not in normalization_params:
+                raise ValueError(f"Missing required parameter: {key}")
+        
+        edge = normalization_params['edge']
+        
+        if normalization_params['fit_individual']:
+            # Handle individual time instance fits
+            if 'individual_params' not in normalization_params:
+                raise ValueError("Missing individual_params for individual fitting mode")
+                
+            reconstructed_spectrum = np.zeros_like(normalized_spectrum)
+            
+            for time in range(normalized_spectrum.shape[1]):
+                time_params = normalization_params['individual_params'][time]
+                pre_edge_fit_params = time_params['pre_edge_fit_params']
+                post_edge_fit_params = time_params['post_edge_fit_params']
+                edge_step = time_params['edge_step']
+                
+                # Get fit function types
+                pre_func = normalization_params['pre_edge_region_params'][2]
+                post_func = normalization_params['post_edge_region_params'][2]
+                
+                # Reconstruct fits
+                pre_edge_fit = self.reconstruct_fit(x, pre_edge_fit_params, pre_func)
+                post_edge_fit = self.reconstruct_fit(x, post_edge_fit_params, post_func)
+                
+                # Reconstruct flat correction
+                index = np.argmin(np.abs(x - edge))
+                post_edge_norm = (post_edge_fit - pre_edge_fit) / edge_step
+                flat_correction = np.zeros_like(post_edge_norm)
+                flat_correction[index:] = 1 - post_edge_norm[index:]
+                
+                # Reverse normalization: y_orig = (y_norm - flat_correction) * edge_step + pre_edge_fit
+                reconstructed_spectrum[:, time] = (normalized_spectrum[:, time] - flat_correction) * edge_step + pre_edge_fit
+                
+        else:
+            # Handle single normalization for all time instances
+            pre_edge_fit_params = normalization_params['pre_edge_fit_params']
+            post_edge_fit_params = normalization_params['post_edge_fit_params']
+            edge_step = normalization_params['edge_step']
+            
+            # Get fit function types
+            pre_func = normalization_params['pre_edge_region_params'][2]
+            post_func = normalization_params['post_edge_region_params'][2]
+            
+            # Reconstruct fits
+            pre_edge_fit = self.reconstruct_fit(x, pre_edge_fit_params, pre_func)
+            post_edge_fit = self.reconstruct_fit(x, post_edge_fit_params, post_func)
+            
+            # Reconstruct flat correction
+            index = np.argmin(np.abs(x - edge))
+            post_edge_norm = (post_edge_fit - pre_edge_fit) / edge_step
+            flat_correction = np.zeros_like(post_edge_norm)
+            flat_correction[index:] = 1 - post_edge_norm[index:]
+            
+            # Reverse normalization
+            if normalized_spectrum.ndim == 2:
+                reconstructed_spectrum = (normalized_spectrum - flat_correction[:, None]) * edge_step + pre_edge_fit[:, None]
+            else:
+                reconstructed_spectrum = (normalized_spectrum - flat_correction) * edge_step + pre_edge_fit
+        
+        return reconstructed_spectrum

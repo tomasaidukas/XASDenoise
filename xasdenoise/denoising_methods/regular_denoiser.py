@@ -61,17 +61,12 @@ class RegularDenoiser:
                             "params": {"modes": 10, "modes_to_keep": 1},
                             "params_bounds": {"modes": [1, 20], "modes_to_keep": [1, 20]}
                     },
-        "dictionary_learning": {
-                            "params": {"n_components": 50, "alpha": 1, "max_iter": 100},
-                            "params_bounds": {"n_components": [1, 100], "alpha": [0, 10], "max_iter": [1, 100]}
-                                },
     }
     
-    # New denoising methods added to the DEFAULT_PARAMS
     DEFAULT_PARAMS.update({
         "non_local_means_2d": {
-                            "params": {"patch_size": 11, "search_size": 11, "h": 0.1},                               
-                            "params_bounds": {"h": [0.1, 1.5]}
+                            "params": {"patch_size": 9, "search_size": 9, "h": 0.1},                               
+                            "params_bounds": {"h": [0.01, 1.5], "patch_size": [3, 31]}
                                },
         "total_variation_2d": {
                             "params": {"weight": 1, "max_iter": 200, "eps": 2.0e-6},
@@ -89,11 +84,15 @@ class RegularDenoiser:
                             "params": {"size_r": 3, "size_c": 3},
                             "params_bounds": {"size_r": [3, 101], "size_c": [3, 101]}
                             },
+        "robust_pca": {
+                            "params": {"lambda_sparse": 0.1, "max_iter": 100},
+                            "params_bounds": {"lambda_sparse": [0.01, 1.0]}
+                            },
         
     })
     
     # define_methods which take the whole 2D data into account when denoising instead of looping over individual spectra
-    METHODS_2D = ['non_local_means_2d', 'total_variation_2d', 'pca', 'gaussian_filter_2d', 'uniform_filter_2d']
+    METHODS_2D = ['non_local_means_2d', 'total_variation_2d', 'pca', 'gaussian_filter_2d', 'uniform_filter_2d', 'robust_pca']
     
     def __init__(self, method_name="butterworth", **params):
         """
@@ -451,6 +450,9 @@ class RegularDenoiser:
                                     h=h,
                                     fast_mode=True)
         
+        if y.shape[1] == 1:
+            y_denoised = y_denoised[:, None]
+        
         # Restore original scale
         return y_denoised * (y_max - y_min) + y_min
 
@@ -667,30 +669,56 @@ class RegularDenoiser:
             
         return y_filtered
     
-    def dictionary_learning(self, x, y, n_components=50, alpha=1.0, max_iter=1000):
+    def robust_pca(self, x, y, lambda_sparse=0.1, max_iter=100, tol=1e-7):
         """
-        Perform dictionary learning-based denoising on the input signal.
+        Robust PCA via Principal Component Pursuit for separating low-rank signal from sparse outliers.
+        
+        Decomposes data = Low_Rank + Sparse, where Low_Rank is the denoised signal
+        and Sparse contains outliers, glitches, and noise spikes.
 
         Args:
-            x (np.ndarray): Independent variable values (not used directly but included for compatibility).
-            y (np.ndarray): Dependent variable values (signal to be denoised).
-            n_components (int): Number of dictionary components to learn. Defaults to 50.
-            alpha (float): Sparsity controlling parameter (higher values lead to sparser representations). Defaults to 1.0.
-            max_iter (int): Maximum number of iterations for dictionary learning. Defaults to 1000.
+            x (np.ndarray): Independent variable values.
+            y (np.ndarray): Dependent variable values (energy x time).
+            lambda_sparse (float): Sparsity parameter. Larger = more aggressive outlier removal. Defaults to 0.1.
+            max_iter (int): Maximum iterations. Defaults to 100.
+            tol (float): Convergence tolerance. Defaults to 1e-7.
 
         Returns:
-            np.ndarray: Denoised signal.
+            np.ndarray: Denoised signal (low-rank component).
         """
-        # Apply dictionary learning
-        dict_learner = DictionaryLearning(
-            n_components=n_components, alpha=alpha, max_iter=max_iter, transform_algorithm='lasso_lars'
-        )
-        y_denoised = dict_learner.fit_transform(y)
-        y_reconstructed = np.dot(y_denoised, dict_learner.components_)
-
-        return y_reconstructed
-
-
+        from scipy.linalg import svd
+        
+        M = y.copy()
+        L = np.zeros_like(M)  # Low-rank component (signal)
+        S = np.zeros_like(M)  # Sparse component (outliers/noise)
+        Y = np.zeros_like(M)  # Lagrange multiplier
+        
+        # Initialize parameters
+        mu = 1.25 / np.linalg.norm(M, 2)
+        mu_inv = 1.0 / mu
+        
+        for iteration in range(max_iter):
+            # Update L (low-rank via SVD soft-thresholding)
+            U, sigma, Vt = svd(M - S + Y * mu_inv, full_matrices=False)
+            sigma_thresh = np.maximum(sigma - mu_inv, 0)
+            L = U @ np.diag(sigma_thresh) @ Vt
+            
+            # Update S (sparse via soft-thresholding)
+            temp = M - L + Y * mu_inv
+            S = np.sign(temp) * np.maximum(np.abs(temp) - lambda_sparse * mu_inv, 0)
+            
+            # Update Y (Lagrange multiplier)
+            Y = Y + mu * (M - L - S)
+            
+            # Check convergence
+            residual = np.linalg.norm(M - L - S, 'fro')
+            if residual < tol:
+                if self.verbose > 0:
+                    print(f"Robust PCA converged at iteration {iteration+1}")
+                break
+        
+        return L  # Return denoised (low-rank) component
+    
 
     # --------------------------- Optimization Methods ---------------------------
     def optimize_denoiser_params(self, x, y, y_reference=None, noise=None, denoising_method=None):
@@ -795,7 +823,7 @@ class RegularDenoiser:
             loss = []
             # candidates = [param_value, param_bounds[0], param_bounds[1], param_bounds[0] + (param_bounds[1] - param_bounds[0]) / 2]
             
-            if denoising_method.__name__.lower() in ['total_variation', 'total_variation_2d']:
+            if denoising_method.__name__.lower() in ['total_variation', 'total_variation_2d', 'robust_pca']:
                 # For TV denoising, we use a fixed set of candidates
                 candidates = np.logspace(np.log(param_bounds[0]), np.log(param_bounds[1]), self.optimize_params_grid_num, dtype=type(param_value))
             else:

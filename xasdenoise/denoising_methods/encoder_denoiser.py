@@ -31,7 +31,7 @@ class EncoderDenoiser:
     Note: Requires PyTorch. If not available, raises ImportError on initialization.
     """
     def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, 
-                 channels=None, dropout_rate=0, normalization_method=None):
+                 channels=None, dropout_rate=0, normalization_method=None, bias=False):
         """
         Initialize the EncoderDenoiser with a specified autoencoder architecture.
 
@@ -43,6 +43,7 @@ class EncoderDenoiser:
             kernel_size (int): Kernel size for convolutional layers. Defaults to 7.
             channels (list, optional): Number of channels in each layer. Defaults to None.
             dropout_rate (float): Dropout rate for regularization. Defaults to 0.
+            bias (bool): Whether to include bias terms in layers. Defaults to False.
         """
         # Check dependencies before initialization
         if not TORCH_AVAILABLE:
@@ -60,6 +61,7 @@ class EncoderDenoiser:
         self.dropout_rate = dropout_rate
         self.gpu_index = gpu_index
         self.normalization_method = normalization_method
+        self.bias = bias
         
         # Initialize device - auto-detect if 'auto' is specified
         if device == 'auto':
@@ -71,7 +73,11 @@ class EncoderDenoiser:
         self.gpu_device = self._initialize_device()
         
         if model_type == 'conv':
-            self.encoder_model = ConvDenoisingAutoencoder(num_layers=self.num_layers, kernel_size=self.kernel_size, channels=channels, dropout_rate=dropout_rate).to(self.device)
+            self.encoder_model = ConvDenoisingAutoencoder(num_layers=self.num_layers, 
+                                                          kernel_size=self.kernel_size, 
+                                                          channels=self.channels, 
+                                                          dropout_rate=self.dropout_rate,
+                                                          bias=self.bias).to(self.device)
         else:
             raise ValueError(f"Unknown model type: {model_type}. Only 'conv' is implemented.")
 
@@ -267,7 +273,8 @@ class EncoderDenoiser:
     def train_model(self, y_train, y_target, mask_train=None, y_val=None, y_val_target=None, mask_val=None,
             batch_size=32, num_epochs=1000, learning_rate=1e-4, save_path=None, augment_data=False, noise2noise=False,
             remove_padded_regions=True, randomized_masking=False, loss_weights=None,
-            early_stopping_patience=50, weight_decay=1e-5):
+            early_stopping_patience=50, weight_decay=1e-5, temporal_smoothness_lambda=0.0,
+            static_region_mask=None, static_region_weight=1.0):
         """
         Train the encoder model using the given training data with optional masking.
 
@@ -289,6 +296,14 @@ class EncoderDenoiser:
             loss_weights (torch.Tensor, optional): Weights for each data point in the loss function. Defaults to None.
             early_stopping_patience (int): Number of epochs to wait for improvement before stopping. Defaults to 50.
             weight_decay (float): L2 regularization strength. Defaults to 1e-5.
+            temporal_smoothness_lambda (float): Weight for temporal smoothness regularization. 
+                Encourages smooth evolution across time for time-series data. Defaults to 0.0 (disabled).
+                Recommended values: 0.01-0.1 for Noise2Noise on time-series.
+            static_region_mask (torch.Tensor, optional): Binary mask (shape: energy_points) marking spectral regions
+                that should remain constant across all time points (e.g., pre-edge background, substrate peaks).
+                1 = static region, 0 = evolving region. Defaults to None (no constraint).
+            static_region_weight (float): Weight for static region variance penalty. Higher values enforce
+                stronger temporal invariance in masked regions. Defaults to 1.0.
         """
         # Convert to tensors and initialize arrays
         y_train, y_target, mask_train, y_val, y_val_target, mask_val = self.to_tensor(y_train), self.to_tensor(y_target), self.to_tensor(mask_train), self.to_tensor(y_val), self.to_tensor(y_val_target), self.to_tensor(mask_val)
@@ -299,6 +314,13 @@ class EncoderDenoiser:
         if loss_weights is not None:
             loss_weights = self.to_tensor(loss_weights)
             loss_weights0 = loss_weights.clone()
+        
+        # Preprocess static region mask
+        if static_region_mask is not None:
+            static_region_mask = self.to_tensor(static_region_mask)
+            # Ensure it's the right shape (should be 1D with length = num_energy_points)
+            if static_region_mask.dim() == 1:
+                static_region_mask = static_region_mask.unsqueeze(0)  # Make it (1, energy_points)
             
         # Normalize data
         if y_val is not None:
@@ -309,8 +331,13 @@ class EncoderDenoiser:
         y_target = self.normalize_data(y_target, compute_norm=False, method=self.normalization_method)
         
         # Prepare datasets
+        if temporal_smoothness_lambda > 0.0:
+            shuffle = False
+        else:
+            shuffle = True
+            
         train_dataset = TensorDataset(y_train, y_target, mask_train) if mask_train is not None else TensorDataset(y_train, y_target)
-        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
         
         if y_val is not None and y_val_target is not None:
             val_dataset = TensorDataset(y_val, y_val_target, mask_val) if mask_val is not None else TensorDataset(y_val, y_val_target)
@@ -396,11 +423,44 @@ class EncoderDenoiser:
                     # Forward pass
                     outputs = self.encoder_model(y_batch)
                     
-                    # Compute masked loss
+                    # Compute masked loss (reconstruction loss)
                     loss = criterion(outputs, y_target_batch)  # Per-element loss
                     if loss_weights is not None:
                         loss = loss * loss_weights
-                    loss = (loss * mask_batch).sum() / mask_batch.sum()  # Compute mean over valid values only
+                    reconstruction_loss = (loss * mask_batch).sum() / mask_batch.sum()  # Compute mean over valid values only
+
+                    # Add temporal smoothness regularization if enabled
+                    temporal_loss = 0.0
+                    if temporal_smoothness_lambda > 0 and outputs.shape[0] > 1:  # Need at least 2 time points
+                        # Compute differences between consecutive time points (first order smoothness)
+                        temporal_diff = outputs[1:, :] - outputs[:-1, :]
+                        # L2 norm of temporal differences
+                        first_order_loss = torch.mean(temporal_diff ** 2)
+                    
+                        # endpoint loss
+                        endpoint_error = outputs[-1, :] - outputs[-2, :]
+                        
+                        # Second-order smoothness (penalize acceleration/curvature)
+                        second_order_diff = temporal_diff[1:, :] - temporal_diff[:-1, :]
+                        second_order_loss = torch.mean(second_order_diff ** 2)
+
+                        # Combine first and second order losses
+                        temporal_loss = first_order_loss + 0.5 * second_order_loss + torch.mean(endpoint_error ** 2)
+
+                            
+                    # Add static region constraint if enabled
+                    static_loss = 0.0
+                    if static_region_mask is not None and outputs.shape[0] > 1:
+                        # Extract the static regions from all time points
+                        static_outputs = outputs * static_region_mask  # Broadcasting: (time, energy) * (1, energy)
+                        # Compute variance across time dimension for static regions
+                        # Ideally, variance should be zero (no temporal evolution)
+                        static_variance = torch.var(static_outputs, dim=0, unbiased=False)  # Shape: (energy,)
+                        # Only penalize variance where mask is active (non-zero)
+                        static_loss = torch.sum(static_variance * static_region_mask.squeeze()) / (static_region_mask.sum() + 1e-8)
+                        
+                    # Total loss with regularization
+                    loss = reconstruction_loss + temporal_smoothness_lambda * temporal_loss + static_region_weight * static_loss
 
                     # Backward pass and optimization
                     optimizer.zero_grad()
@@ -452,10 +512,27 @@ class EncoderDenoiser:
                                 
                             outputs = self.encoder_model(y_batch)
                             
+                            # Compute masked loss (reconstruction loss)
                             loss = criterion(outputs, y_target_batch)  # Per-element loss
                             if loss_weights is not None:
                                 loss = loss * loss_weights
-                            loss = (loss * mask_batch).sum() / mask_batch.sum()  # Compute mean over valid values only
+                            reconstruction_loss = (loss * mask_batch).sum() / mask_batch.sum()  # Compute mean over valid values only
+
+                            # Add temporal smoothness regularization if enabled
+                            temporal_loss = 0.0
+                            if temporal_smoothness_lambda > 0 and outputs.shape[0] > 1:
+                                temporal_diff = outputs[1:, :] - outputs[:-1, :]
+                                temporal_loss = torch.mean(temporal_diff ** 2)
+                            
+                            # Add static region constraint if enabled
+                            static_loss = 0.0
+                            if static_region_mask is not None and outputs.shape[0] > 1:
+                                static_outputs = outputs * static_region_mask
+                                static_variance = torch.var(static_outputs, dim=0, unbiased=False)
+                                static_loss = torch.sum(static_variance * static_region_mask.squeeze()) / (static_region_mask.sum() + 1e-8)
+                            
+                            # Total loss
+                            loss = reconstruction_loss + temporal_smoothness_lambda * temporal_loss + static_region_weight * static_loss
 
                             val_loss += loss.item()
                     val_loss /= len(val_loader)                
@@ -702,7 +779,7 @@ class EncoderDenoiser:
 
 if TORCH_AVAILABLE:
     class ConvDenoisingAutoencoder(nn.Module):
-        def __init__(self, num_layers=4, kernel_size=7, channels=None, dropout_rate=0):
+        def __init__(self, num_layers=4, kernel_size=7, channels=None, dropout_rate=0, bias=False):
             super().__init__()
             if channels is None:
                 # Channels: 16, 32, 64, ..., 16 * 2**(num_layers-1)
@@ -713,13 +790,14 @@ if TORCH_AVAILABLE:
             self.num_layers = num_layers
             self.kernel_size = kernel_size
             self.dropout_rate = dropout_rate
+            self.bias = bias
 
             # Encoder with dropout
             encoder_layers = []
             in_c = 1
             for i, out_c in enumerate(channels):
                 encoder_layers.append(
-                    nn.Conv1d(in_c, out_c, kernel_size=kernel_size, padding=kernel_size // 2, bias=False, padding_mode='reflect')
+                    nn.Conv1d(in_c, out_c, kernel_size=kernel_size, padding=kernel_size // 2, bias=self.bias, padding_mode='reflect')
                 )
                 encoder_layers.append(nn.ReLU())
                 # Add dropout after ReLU, but not after the last layer of encoder
@@ -733,14 +811,14 @@ if TORCH_AVAILABLE:
             rev_channels = list(reversed(channels))
             for i in range(len(rev_channels) - 1):
                 decoder_layers.append(
-                    nn.ConvTranspose1d(rev_channels[i], rev_channels[i+1], kernel_size=kernel_size, padding=kernel_size // 2, bias=False)
+                    nn.ConvTranspose1d(rev_channels[i], rev_channels[i+1], kernel_size=kernel_size, padding=kernel_size // 2, bias=self.bias)
                 )
                 decoder_layers.append(nn.ReLU())
                 # Add dropout after ReLU in decoder layers
                 if dropout_rate > 0:
                     decoder_layers.append(nn.Dropout1d(dropout_rate))
             decoder_layers.append(
-                nn.ConvTranspose1d(rev_channels[-1], 1, kernel_size=kernel_size, padding=kernel_size // 2, bias=False)
+                nn.ConvTranspose1d(rev_channels[-1], 1, kernel_size=kernel_size, padding=kernel_size // 2, bias=self.bias)
             )
             self.decoder = nn.Sequential(*decoder_layers)
 

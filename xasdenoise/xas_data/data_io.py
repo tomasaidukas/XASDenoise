@@ -12,6 +12,81 @@ import h5py
 import numpy as np
 import csv
 import pickle
+import json
+
+
+def _serialize_for_json(obj):
+    """Helper function to serialize numpy objects for JSON."""
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif hasattr(obj, 'item'):  # numpy scalars
+        return obj.item()
+    elif isinstance(obj, (np.int64, np.int32, np.float64, np.float32)):
+        return obj.item()
+    else:
+        return str(obj)  # Fallback to string representation
+
+
+def _save_metadata_recursive(group, data_dict):
+    """Recursively save metadata, handling complex nested structures."""
+    for key, value in data_dict.items():
+        if value is not None:
+            try:
+                if isinstance(value, (list, np.ndarray)):
+                    # Check if array can be saved directly to HDF5
+                    arr = np.array(value)
+                    if arr.dtype == np.object_:
+                        # Complex nested structure, serialize as JSON
+                        json_str = json.dumps(value, default=_serialize_for_json)
+                        group.attrs[f"{key}_json"] = json_str
+                    else:
+                        # Simple array, save directly
+                        group.create_dataset(key, data=arr)
+                elif isinstance(value, dict):
+                    # Create subgroup for nested dictionaries
+                    subgrp = group.create_group(key)
+                    _save_metadata_recursive(subgrp, value)
+                else:
+                    # Simple value, save as attribute
+                    # Convert numpy scalars to Python types for HDF5 compatibility
+                    if hasattr(value, 'item'):
+                        value = value.item()
+                    group.attrs[key] = value
+            except Exception:
+                # If saving fails, try to serialize as JSON (silently)
+                try:
+                    json_str = json.dumps(value, default=_serialize_for_json)
+                    group.attrs[f"{key}_json"] = json_str
+                except Exception:
+                    # Skip if can't serialize
+                    pass
+
+
+def _load_metadata_recursive(group):
+    """Recursively load metadata, handling JSON-serialized complex structures."""
+    data = {}
+    
+    # Load datasets
+    for key in group:
+        if isinstance(group[key], h5py.Group):
+            data[key] = _load_metadata_recursive(group[key])
+        else:
+            data[key] = np.array(group[key])
+    
+    # Load attributes
+    for key, value in group.attrs.items():
+        if key.endswith('_json'):
+            # Deserialize JSON data
+            original_key = key[:-5]  # Remove '_json' suffix
+            try:
+                data[original_key] = json.loads(value)
+            except Exception:
+                # Keep as string if deserialization fails (silently)
+                data[original_key] = value
+        else:
+            data[key] = value
+    
+    return data
 
 
 def _load_single_spectrum(path, metadata, path_I0=None, path_I1=None):
@@ -251,19 +326,7 @@ def save_spectra_to_h5(spectra, filename, element=None):
 
             # Save metadata
             metadata_grp = grp.create_group('metadata')
-            for key, value in spectrum.metadata.items():
-                if value is not None:
-                    if isinstance(value, (list, np.ndarray)):
-                        metadata_grp.create_dataset(key, data=np.array(value))
-                    elif isinstance(value, dict):
-                        subgrp = metadata_grp.create_group(key)
-                        for subkey, subvalue in value.items():
-                            if isinstance(subvalue, (list, np.ndarray)):
-                                subgrp.create_dataset(subkey, data=np.array(subvalue))
-                            else:
-                                subgrp.attrs[subkey] = subvalue
-                    else:
-                        metadata_grp.attrs[key] = value
+            _save_metadata_recursive(metadata_grp, spectrum.metadata)
             print(f"Saved spectrum {spectrum.metadata.get('compound', 'Unnamed')}.")
     print(f"Saved spectra to {filename}. Updated only element '{element}'" if element else "Saved all spectra.")
 
@@ -290,20 +353,7 @@ def load_spectra_from_h5(filename, element=None, compound=None):
 
             # Load metadata
             metadata_grp = grp['metadata']
-            metadata = {}
-            for key in metadata_grp:
-                if isinstance(metadata_grp[key], h5py.Group):
-                    subgrp = metadata_grp[key]
-                    subdict = {}
-                    for subkey in subgrp:
-                        subdict[subkey] = np.array(subgrp[subkey])
-                    for subkey, subvalue in subgrp.attrs.items():
-                        subdict[subkey] = subvalue
-                    metadata[key] = subdict
-                else:
-                    metadata[key] = np.array(metadata_grp[key])
-            for key, value in metadata_grp.attrs.items():
-                metadata[key] = value
+            metadata = _load_metadata_recursive(metadata_grp)
 
             # Filter spectra by element and compound
             spectrum_element = str(metadata.get('element'))

@@ -78,7 +78,7 @@ class DataInterpolator:
             # Upsample based on minimum meaningful spacing
             min_dist = self._get_min_meaningful_distance(x_warped)
             self.window_width = min_dist
-            interpolation_target_poinxts = self.config.get('interpolation_target_points', None)
+            interpolation_target_points = self.config.get('interpolation_target_points', None)
             if interpolation_target_points is None:
                 interpolation_target_points = int((x_warped.max() - x_warped.min()) / min_dist) if self.num_points is None else self.num_points
             self.x_uniform = np.linspace(x_warped.min(), x_warped.max(), interpolation_target_points)
@@ -134,6 +134,7 @@ class DataInterpolator:
         
         # Use binned interpolation for better performance and accuracy
         y_interpolated = self._interpolate_with_bins(self.x_input, y, self.x_uniform)
+        # y_interpolated = self._interpolate_standard(self.x_input, y, self.x_uniform)
         
         if self.verbose >= 2:
             self._visualize_interpolation(self.x_input, y, self.x_uniform, y_interpolated)
@@ -390,7 +391,13 @@ class DataInterpolator:
         """Standard interpolation using scipy."""
         f = interp1d(x, y, axis=0, kind=self.interpolation_kind,
                     fill_value=self._compute_bounds(y), bounds_error=False)
-        return f(x_new)
+        
+        if y.dtype == np.bool_:
+            # For boolean data, interpolate as float and threshold
+            y_new = f(x_new)
+            return y_new >= 0.5
+        else:
+            return f(x_new)
     
     def _compute_bounds(self, y: np.ndarray) -> Union[float, Tuple[float, float]]:
         """Compute boundary values for extrapolation."""

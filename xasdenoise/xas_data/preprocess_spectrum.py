@@ -354,21 +354,77 @@ def normalize_spectrum(data, reference=None, fitting_funcs=['1','V'], fit_indivi
                             x_fit[data.post_edge_region_indices[-1]] - edge, 
                             data.metadata.get('post_edge_fit_func', fitting_funcs[-1])])
         
+    # Store original spectrum for potential undo operation
+    data.original_spectrum = y.copy()
+    
     # Normalize spectrum using the best pre/post fits
     if fit_individual:
         # run one normalization on the averaged data to get the initial fit parameters
         _, _ = normalise.norm(x_fit, y_fit, y, pre_edge_fit_params, post_edge_fit_params, edge)
 
         edge_step = np.zeros(y.shape[1])
+        normalization_params = []
+        
         for time in range(y.shape[1]):
             data.spectrum[:, time], edge_step[time] = normalise.norm(
                 x_fit, y_ref[:, time], y[:, time], pre_edge_fit_params, post_edge_fit_params, edge
             )
+            # Store normalization parameters for each time instance
+            normalization_params.append({
+                'pre_edge_fit_params': normalise.fit_p0_pre_edge.copy(),
+                'post_edge_fit_params': normalise.fit_p0_post_edge.copy(),
+                'edge_step': edge_step[time]
+            })
+        
+        # Store parameters for undo operation
+        data.metadata['normalization_params'] = {
+            'individual_params': normalization_params,
+            'pre_edge_region_params': pre_edge_fit_params,
+            'post_edge_region_params': post_edge_fit_params,
+            'edge': edge,
+            'fit_individual': True
+        }
     else:
         data.spectrum, edge_step = normalise.norm(x_fit, y_fit, y, pre_edge_fit_params, post_edge_fit_params, edge)
-        # data.spectrum = y / np.mean(y, axis=0) * np.mean(data.spectrum, axis=0)
+        
+        # Store parameters for undo operation
+        data.metadata['normalization_params'] = {
+            'pre_edge_fit_params': normalise.fit_p0_pre_edge.copy(),
+            'post_edge_fit_params': normalise.fit_p0_post_edge.copy(),
+            'pre_edge_region_params': pre_edge_fit_params,
+            'post_edge_region_params': post_edge_fit_params,
+            'edge': edge,
+            'edge_step': edge_step,
+            'fit_individual': False
+        }
     
     data.edge_step = edge_step
+    
+def undo_spectrum_normalization(data):
+    """
+    Reconstruct the unnormalized spectrum from normalized data using stored parameters.
+    
+    This function mathematically reverses the normalization by reconstructing the 
+    pre-edge and post-edge fits and applying the inverse transformation.
+
+    Args:
+        data (Spectrum): A Spectrum object containing normalized spectrum data and 
+                        stored normalization parameters.
+
+    Returns:
+        np.ndarray: The reconstructed unnormalized spectrum.
+        
+    Raises:
+        ValueError: If normalization parameters are not found in the spectrum object.
+    """
+    # Check if normalization parameters are available
+    if 'normalization_params' not in data.metadata:
+        raise ValueError("No normalization parameters found. Cannot reconstruct unnormalized spectrum.")
+    
+    # Use the NormFit class to perform the reconstruction
+    normalizer = normalization.NormFit()
+    spectrum = normalizer.undo_normalization(data.energy, data.spectrum, data.metadata['normalization_params'])
+    data.spectrum = spectrum
     
 def estimate_background(data, save_background=True):
     """

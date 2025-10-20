@@ -85,11 +85,13 @@ class PipelineConfig:
         
         # Validate warping method
         valid_warping_methods = [None, 'kspace', 'smoothness', 'kspace_exafs_smoothness_xanes', 'log']
-        if self.input_warping_method not in valid_warping_methods:
+        if callable(self.input_warping_method):
+            pass  # Custom callable provided
+        elif self.input_warping_method not in valid_warping_methods:
             raise ValueError(f"input_warping_method must be one of {valid_warping_methods}")
         
         # Validate interpolation method
-        valid_interp_methods = [None, 'downsample', 'upsample', 'same']
+        valid_interp_methods = [None, 'downsample', 'upsample', 'same', 'optimize']
         if self.warping_interpolation_method not in valid_interp_methods:
             raise ValueError(f"warping_interpolation_method must be one of {valid_interp_methods}")
         

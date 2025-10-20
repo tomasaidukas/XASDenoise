@@ -9,6 +9,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from typing import Optional, Union
 
+from scipy.constants import alpha
+
 
 class InputWarper:
     """
@@ -61,7 +63,10 @@ class InputWarper:
         
         if self.verbose > 0:
             self.visualize_warping() 
-            print(f"Input warping initialized using '{self.method}' method")
+            if callable(self.method):
+                print(f"Input warping initialized using custom callable method")
+            else:
+                print(f"Input warping initialized using '{self.method}' method")
             print(f"Original x range: [{x.min():.4f}, {x.max():.4f}]")
             print(f"Warped x range: [{self.x_warped.min():.4f}, {self.x_warped.max():.4f}]")
             
@@ -92,6 +97,10 @@ class InputWarper:
         Returns:
             Warped coordinates
         """
+        # check if self.method is a function
+        if callable(self.method):
+            return self.method(x, edge_energy)
+
         if self.method == 'kspace':
             if edge_energy is None:
                 raise ValueError("Edge energy must be provided for k-space warping")
@@ -119,10 +128,7 @@ class InputWarper:
             if smoothness_1d.ndim != 1:
                 raise ValueError(f"Smoothness must be 1D after squeezing, got shape {smoothness_1d.shape}")
             return self._combined_warping(x, edge_energy, smoothness_1d)
-        
-        elif self.method == 'log':
-            return np.log(x - x.min() + 1e-6)
-        
+
         elif self.method is None or self.method == 'none':
             return x.copy()
         
