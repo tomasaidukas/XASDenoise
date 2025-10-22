@@ -31,7 +31,8 @@ class EncoderDenoiser:
     Note: Requires PyTorch. If not available, raises ImportError on initialization.
     """
     def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, 
-                 channels=None, dropout_rate=0, normalization_method=None, bias=False):
+                 channels=None, dropout_rate=0, normalization_method=None, bias=False,
+                 output_mode='direct'):
         """
         Initialize the EncoderDenoiser with a specified autoencoder architecture.
 
@@ -62,6 +63,7 @@ class EncoderDenoiser:
         self.gpu_index = gpu_index
         self.normalization_method = normalization_method
         self.bias = bias
+        self.output_mode = output_mode
         
         # Initialize device - auto-detect if 'auto' is specified
         if device == 'auto':
@@ -77,7 +79,9 @@ class EncoderDenoiser:
                                                           kernel_size=self.kernel_size, 
                                                           channels=self.channels, 
                                                           dropout_rate=self.dropout_rate,
-                                                          bias=self.bias).to(self.device)
+                                                          bias=self.bias,
+                                                          output_mode=self.output_mode
+                                                          ).to(self.device)
         else:
             raise ValueError(f"Unknown model type: {model_type}. Only 'conv' is implemented.")
 
@@ -779,7 +783,13 @@ class EncoderDenoiser:
 
 if TORCH_AVAILABLE:
     class ConvDenoisingAutoencoder(nn.Module):
-        def __init__(self, num_layers=4, kernel_size=7, channels=None, dropout_rate=0, bias=False):
+        def __init__(self, 
+                     num_layers=4, 
+                     kernel_size=7, 
+                     channels=None, 
+                     dropout_rate=0, 
+                     bias=False, 
+                     output_mode='direct'):
             super().__init__()
             if channels is None:
                 # Channels: 16, 32, 64, ..., 16 * 2**(num_layers-1)
@@ -791,6 +801,7 @@ if TORCH_AVAILABLE:
             self.kernel_size = kernel_size
             self.dropout_rate = dropout_rate
             self.bias = bias
+            self.output_mode = output_mode
 
             # Encoder with dropout
             encoder_layers = []
@@ -799,8 +810,9 @@ if TORCH_AVAILABLE:
                 encoder_layers.append(
                     nn.Conv1d(in_c, out_c, kernel_size=kernel_size, padding=kernel_size // 2, bias=self.bias, padding_mode='reflect')
                 )
+                # encoder_layers.append(nn.InstanceNorm1d(out_c, affine=True))
                 encoder_layers.append(nn.ReLU())
-                # Add dropout after ReLU, but not after the last layer of encoder
+
                 if i < len(channels) - 1 and dropout_rate > 0:
                     encoder_layers.append(nn.Dropout1d(dropout_rate))
                 in_c = out_c
@@ -813,8 +825,9 @@ if TORCH_AVAILABLE:
                 decoder_layers.append(
                     nn.ConvTranspose1d(rev_channels[i], rev_channels[i+1], kernel_size=kernel_size, padding=kernel_size // 2, bias=self.bias)
                 )
+                # decoder_layers.append(nn.InstanceNorm1d(rev_channels[i+1], affine=True))
                 decoder_layers.append(nn.ReLU())
-                # Add dropout after ReLU in decoder layers
+
                 if dropout_rate > 0:
                     decoder_layers.append(nn.Dropout1d(dropout_rate))
             decoder_layers.append(
@@ -831,11 +844,17 @@ if TORCH_AVAILABLE:
         def forward(self, x):
             x = x.unsqueeze(1)
             crop = self._get_edge_crop()
-            # Pad to avoid edge artefacts
-            x = nn.functional.pad(x, (crop, crop), mode='reflect')
-            encoded = self.encoder(x)
+            x_padded = nn.functional.pad(x, (crop, crop), mode='reflect')
+
+            encoded = self.encoder(x_padded)
             decoded = self.decoder(encoded)
-            # Crop the padded values
+
             if crop > 0:
                 decoded = decoded[..., crop:-crop]
-            return decoded.squeeze(1)
+
+            # Residual learning: predict noise, subtract from input
+            if self.output_mode == 'residual':
+                out = x - decoded
+                return out.squeeze(1)
+            elif self.output_mode == 'direct':
+                return decoded.squeeze(1)

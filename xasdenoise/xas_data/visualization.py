@@ -134,6 +134,63 @@ def spectrum_plot(
     plt.plot(energy, spectrum, label=labels)
 
 
+def spectrum_plot_time_gradient(
+    energy: np.ndarray,
+    spectrum: np.ndarray,
+    label: str,
+    crop: Optional[np.ndarray] = None,
+    time_index: Optional[int] = None,
+    cmap: str = 'plasma',
+) -> None:
+    """
+    Helper function to plot spectrum data with appropriate labels.
+
+    Args:
+        energy (np.ndarray): Array of energy values.
+        spectrum (np.ndarray): Array of spectrum values.
+        label (str): Label for the plot.
+        crop (Optional[np.ndarray]): Indices for cropping the data. Defaults to None.
+        time_index (Optional[int]): Specific time index to plot. Defaults to None.
+        time_gradient (bool): Whether to use gradient colors for time instances. Defaults to False.
+        cmap (str): Colormap for gradient plotting. Defaults to 'plasma'.
+    """
+    if crop is not None:
+        energy = energy[crop]
+        spectrum = spectrum[crop, :] if spectrum.ndim > 1 else spectrum[crop]
+
+    if time_index is not None:
+        spectrum = spectrum[:, time_index]
+
+    # If gradient is requested and we have time-series data, plot with colors from colormap
+    if spectrum.ndim > 1:
+        cmap_obj = plt.get_cmap(cmap)
+        n_times = spectrum.shape[1]
+        colors = [cmap_obj(i / max(1, n_times - 1)) for i in range(n_times)]
+        
+        # Plot each time instance as its own line with gradient color
+        for idx in range(n_times):
+            y = spectrum[:, idx]
+            line_label = label if idx == 0 else None  # Only label the first line
+            plt.plot(energy, y, color=colors[idx], label=line_label, alpha=0.5)
+        
+        # Add colorbar with proper axes reference
+        sm = plt.cm.ScalarMappable(cmap=cmap_obj, norm=plt.Normalize(vmin=0, vmax=n_times-1))
+        sm.set_array([])
+        cbar = plt.colorbar(sm, ax=plt.gca(), label='Time Instance')
+        # Set colorbar ticks to show actual time indices
+        if n_times <= 10:
+            cbar.set_ticks(range(n_times))
+            cbar.set_ticklabels([str(i) for i in range(n_times)])
+        else:
+            # For many time instances, show fewer ticks
+            tick_indices = np.linspace(0, n_times-1, 5).astype(int)
+            cbar.set_ticks(tick_indices)
+            cbar.set_ticklabels([str(i) for i in tick_indices])
+    else:
+        # Standard plotting behavior
+        labels = label if spectrum.ndim == 1 else [label] + [None] * (spectrum.shape[1] - 1)
+        plt.plot(energy, spectrum, label=labels)
+
 def descriptor_plot(val: float, descriptor: str, colors: str) -> None:
     """
     Plot a vertical line for a descriptor.
@@ -167,14 +224,14 @@ def get_crop(energy: np.ndarray, edge: float, crop_min: int, crop_max: int) -> n
     Args:
         energy (np.ndarray): Array of energy values.
         edge (float): Energy value of the edge.
-        crop_min (int): Minimum crop around the edge.
-        crop_max (int): Maximum crop around the edge.
+        crop_min (int): Minimum crop energy.
+        crop_max (int): Maximum crop energy.
 
     Returns:
         np.ndarray: Indices for cropping the data.
     """
-    edge_idx0 = np.argmin(abs(energy - (edge - crop_min)))
-    edge_idx1 = np.argmin(abs(energy - (edge + crop_max)))
+    edge_idx0 = np.argmin(abs(energy - crop_min))
+    edge_idx1 = np.argmin(abs(energy - crop_max))
     return np.arange(edge_idx0, edge_idx1)
 
 
@@ -386,6 +443,8 @@ def plot_spectrum_time_instances(
     time_binning_size: Optional[int] = None,
     crop_min: Optional[int] = None,
     crop_max: Optional[int] = None,
+    plot_gradient: bool = False,
+    cmap: str = 'plasma',
 ) -> None:
     """
     Plot time instances for a single Spectrum object.
@@ -420,10 +479,13 @@ def plot_spectrum_time_instances(
         data = data.copy()
         data.bin_time_instances(time_binning_size)
                 
-    spectrum_plot(data.energy, data.spectrum, label, crop, time_indices)
-    
-    fig = plt.gcf()
-    displace_time_instances_vertically(fig, vertical_displacement_offset, labels)
+    if plot_gradient:
+        spectrum_plot_time_gradient(data.energy, data.spectrum, label, crop, time_indices, cmap)
+    else:
+        spectrum_plot(data.energy, data.spectrum, label, crop, time_indices)
+        
+        fig = plt.gcf()
+        displace_time_instances_vertically(fig, vertical_displacement_offset, labels)
 
 
 def plot_time_evolution_3d(

@@ -68,9 +68,20 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None):
     processed_data['x'] = np.repeat(processed_data.get('x')[None, :], num_times, axis=0)
     if processed_data.get('data_mask') is not None:
         processed_data['data_mask'] = np.repeat(processed_data.get('data_mask')[None, :], num_times, axis=0)
-    processed_data['compounds'] = np.repeat([spectrum_obj.metadata['compound']], num_times, axis=0)
-    processed_data['elements'] = np.repeat([spectrum_obj.metadata['element']], num_times, axis=0)
-    processed_data['edges'] = np.repeat([spectrum_obj.edge], num_times, axis=0)
+    try:
+        processed_data['compounds'] = np.repeat([spectrum_obj.metadata['compound']], num_times, axis=0)
+    except:
+        pass
+    
+    try:
+        processed_data['elements'] = np.repeat([spectrum_obj.metadata['element']], num_times, axis=0)
+    except:
+        pass
+    
+    try:
+        processed_data['edges'] = np.repeat([spectrum_obj.edge], num_times, axis=0)
+    except:
+        pass
 
     return processed_data
 
@@ -307,7 +318,8 @@ def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, m
         'dropout_rate': model_params.get('dropout_rate', 0),
         'channels': model_params.get('channels', None),
         'normalization_method': model_params.get('normalization_method', None),
-        'bias': model_params.get('bias', False)
+        'bias': model_params.get('bias', False),
+        'output_mode': model_params.get('output_mode', 'direct')
     }
     
     # Training parameters with defaults
