@@ -212,7 +212,14 @@ class InteractiveDataProcessing:
             ref_metadata.get('pre_edge_min_E') is not None
         )
         
+
         if has_stored_params:
+            if abs(ref_metadata['pre_edge_min_E']) == np.inf:
+                ref_metadata['pre_edge_min_E'] = np.min(ref_energy)
+            if abs(ref_metadata['post_edge_max_E']) == np.inf:
+                ref_metadata['post_edge_max_E'] = np.max(ref_energy)
+                
+                
             # Use stored parameters (convert from edge-relative to absolute)
             pre_edge_min_init = int(ref_edge + ref_metadata['pre_edge_min_E'])
             pre_edge_max_init = int(ref_edge + ref_metadata['pre_edge_max_E'])
@@ -467,8 +474,11 @@ class InteractiveDataProcessing:
         # load the data based on the selected element
         self.spectrum_list = preprocess_spectrum_list.get_spectra(self.input_spectrum_list, key='element', value=self.selected_element, copy=False)
             
-        # also load the data based on the selected monochromator
-        self.monochromator_options = ['All'] + list(np.unique([s.metadata['monochromator'] for s in self.spectrum_list]))
+        # check if monochromator field exists
+        monochromators = [spectrum.metadata.get('monochromator', 'Unknown') for spectrum in self.spectrum_list]
+        self.monochromator_options = ['All'] + list(np.unique(monochromators))
+        
+        # also load the data based on the selected monochromator   
         if self.selected_monochromator != 'All':
             self.spectrum_list = preprocess_spectrum_list.get_spectra(self.spectrum_list, key='monochromator', value=self.selected_monochromator, copy=False)
         

@@ -32,7 +32,7 @@ class EncoderDenoiser:
     """
     def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, 
                  channels=None, dropout_rate=0, normalization_method=None, bias=False,
-                 output_mode='direct'):
+                 output_mode='direct', output_nonnegativity=False):
         """
         Initialize the EncoderDenoiser with a specified autoencoder architecture.
 
@@ -44,7 +44,10 @@ class EncoderDenoiser:
             kernel_size (int): Kernel size for convolutional layers. Defaults to 7.
             channels (list, optional): Number of channels in each layer. Defaults to None.
             dropout_rate (float): Dropout rate for regularization. Defaults to 0.
+            normalization_method (str, optional): Normalization method to apply to the input data. Defaults to None.
             bias (bool): Whether to include bias terms in layers. Defaults to False.
+            output_mode (str): Output mode of the autoencoder. Options: 'direct', 'residual'. Defaults to 'direct'.
+            output_nonnegativity (bool): If True and output_mode is 'direct', applies softplus to ensure non-negative outputs. Defaults to False.
         """
         # Check dependencies before initialization
         if not TORCH_AVAILABLE:
@@ -64,6 +67,7 @@ class EncoderDenoiser:
         self.normalization_method = normalization_method
         self.bias = bias
         self.output_mode = output_mode
+        self.output_nonnegativity = output_nonnegativity
         
         # Initialize device - auto-detect if 'auto' is specified
         if device == 'auto':
@@ -80,7 +84,8 @@ class EncoderDenoiser:
                                                           channels=self.channels, 
                                                           dropout_rate=self.dropout_rate,
                                                           bias=self.bias,
-                                                          output_mode=self.output_mode
+                                                          output_mode=self.output_mode,
+                                                          output_nonnegativity=self.output_nonnegativity
                                                           ).to(self.device)
         else:
             raise ValueError(f"Unknown model type: {model_type}. Only 'conv' is implemented.")
@@ -442,14 +447,15 @@ class EncoderDenoiser:
                         first_order_loss = torch.mean(temporal_diff ** 2)
                     
                         # endpoint loss
-                        endpoint_error = outputs[-1, :] - outputs[-2, :]
+                        # endpoint_error = outputs[-1, :] - outputs[-2, :]
                         
                         # Second-order smoothness (penalize acceleration/curvature)
                         second_order_diff = temporal_diff[1:, :] - temporal_diff[:-1, :]
                         second_order_loss = torch.mean(second_order_diff ** 2)
 
                         # Combine first and second order losses
-                        temporal_loss = first_order_loss + 0.5 * second_order_loss + torch.mean(endpoint_error ** 2)
+                        temporal_loss = first_order_loss + second_order_loss
+                        # temporal_loss = first_order_loss + 0.5 * second_order_loss + torch.mean(endpoint_error ** 2)
 
                             
                     # Add static region constraint if enabled
@@ -789,7 +795,8 @@ if TORCH_AVAILABLE:
                      channels=None, 
                      dropout_rate=0, 
                      bias=False, 
-                     output_mode='direct'):
+                     output_mode='direct',
+                     output_nonnegativity=False):
             super().__init__()
             if channels is None:
                 # Channels: 16, 32, 64, ..., 16 * 2**(num_layers-1)
@@ -802,7 +809,8 @@ if TORCH_AVAILABLE:
             self.dropout_rate = dropout_rate
             self.bias = bias
             self.output_mode = output_mode
-
+            self.output_nonnegativity = output_nonnegativity
+            
             # Encoder with dropout
             encoder_layers = []
             in_c = 1
@@ -854,7 +862,9 @@ if TORCH_AVAILABLE:
 
             # Residual learning: predict noise, subtract from input
             if self.output_mode == 'residual':
-                out = x - decoded
+                out = x - decoded # Predict noise
                 return out.squeeze(1)
             elif self.output_mode == 'direct':
+                if self.output_nonnegativity:
+                    decoded = nn.functional.softplus(decoded, beta=0.5) # Ensure non-negativity
                 return decoded.squeeze(1)

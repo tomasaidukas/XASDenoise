@@ -319,7 +319,8 @@ def train_encoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, m
         'channels': model_params.get('channels', None),
         'normalization_method': model_params.get('normalization_method', None),
         'bias': model_params.get('bias', False),
-        'output_mode': model_params.get('output_mode', 'direct')
+        'output_mode': model_params.get('output_mode', 'direct'),
+        'output_nonnegativity': model_params.get('output_nonnegativity', False),
     }
     
     # Training parameters with defaults
