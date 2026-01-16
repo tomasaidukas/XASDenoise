@@ -315,7 +315,7 @@ class XASDatabase:
                             remove_bad_time_instances=False, remove_duplicate_compounds=False,
                             time_pts_keep=None, time_bin_size=None, time_average=False,
                             crop_energy=None, normalize_spectrum=False, center_edges=False,
-                            estimate_background=False, remove_glitches=False) -> None:
+                            estimate_background=False, remove_glitches=False, crop_glitch_edges=True) -> None:
         """Wrapper function around process_xas_spectra"""
         
         # Log the processing operation
@@ -331,7 +331,8 @@ class XASDatabase:
             'normalize_spectrum': normalize_spectrum,
             'center_edges': center_edges,
             'estimate_background': estimate_background,
-            'remove_glitches': remove_glitches
+            'remove_glitches': remove_glitches,
+            'crop_glitch_edges': crop_glitch_edges
         }
 
         self._process_xas_spectra(self.spectra, **parameters)
@@ -345,7 +346,7 @@ class XASDatabase:
                             remove_bad_time_instances=False, remove_duplicate_compounds=False,
                             time_pts_keep=None, time_bin_size=None, time_average=False,
                             crop_energy=None, normalize_spectrum=False, center_edges=False,
-                            estimate_background=False, remove_glitches=False) -> None:
+                            estimate_background=False, remove_glitches=False, crop_glitch_edges=True) -> None:
         """
         Preprocess a list of XAS spectra with cropping, normalization, and edge centering.
         
@@ -369,7 +370,9 @@ class XASDatabase:
             normalize_spectrum (bool): Whether to normalize spectra
             center_edges (bool): Whether to center absorption edges
             estimate_background (bool): Whether to estimate background functions
-        
+            remove_glitches (bool): Whether to remove glitches based on glitch masks
+            crop_glitch_edges (bool): Whether to crop edges around glitches
+
         Returns:
             list: List of processed Spectrum objects
         """
@@ -435,7 +438,7 @@ class XASDatabase:
                 glitch_mask = spectrum.glitch_mask
                 if (glitch_mask is not None) and (np.sum(glitch_mask) > 0):
                     print(f'Removing glitches from spectrum {spectrum.compound}')
-                    preprocess_spectrum.remove_glitches(spectrum, glitch_mask, glitch_fill='interp_avg', crop_edges=True)
+                    preprocess_spectrum.remove_glitches(spectrum, glitch_mask, glitch_fill='interp_avg', crop_edges=crop_glitch_edges)
                     # preprocess_spectrum.remove_glitches(spectrum, glitch_mask, glitch_fill='delete', crop_edges=True)
 
         return spectra

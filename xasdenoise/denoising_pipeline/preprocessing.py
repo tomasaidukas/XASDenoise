@@ -66,11 +66,6 @@ class DataPreprocessor:
         # Store original shape for restoration
         self.original_shape = y.shape
         
-        # Validate and reshape dimensions
-        x, y, data_mask, noise, y_weights, y_reference = self._validate_and_reshape(
-            x, y, data_mask, noise, y_weights, y_reference
-        )
-        
         # Remove baseline
         y, baseline, edge_energy = self._remove_baseline(x, y, spectrum_obj)
         self.baseline = baseline
@@ -93,43 +88,6 @@ class DataPreprocessor:
             'y_reference': y_reference,
             'y_weights': y_weights
         }
-    
-    def _validate_and_reshape(self, x, y, data_mask=None, noise=None, 
-                             y_weights=None, y_reference=None):
-        """Validate input dimensions and reshape arrays consistently."""
-        
-        # Validate basic requirements
-        if x.ndim != 1:
-            raise ValueError("x should be a 1D array")
-        
-        # Ensure y is 2D
-        if y.ndim != 2:
-            y = y[:, None]
-        
-        # Validate and reshape other arrays
-        if y_reference is not None and y_reference.ndim != 2:
-            y_reference = y_reference[:, None]
-        
-        if noise is not None and noise.ndim != 2:
-            noise = noise[:, None]
-        
-        if data_mask is not None and data_mask.ndim != 1:
-            data_mask = data_mask[:, 0]
-        
-        # Validate dimensions match
-        if x.shape[0] != y.shape[0]:
-            raise ValueError(f"x and y dimensions do not match: {x.shape[0]} != {y.shape[0]}")
-        
-        if y_reference is not None and y_reference.shape[0] != y.shape[0]:
-            raise ValueError("y_reference dimensions do not match y")
-        
-        if noise is not None and noise.shape != y.shape:
-            raise ValueError("noise dimensions do not match y")
-        
-        if data_mask is not None and data_mask.shape[0] != x.shape[0]:
-            raise ValueError("data_mask dimensions do not match x")
-        
-        return x, y, data_mask, noise, y_weights, y_reference
     
     def _remove_baseline(self, x: np.ndarray, y: np.ndarray, spectrum_obj=None) -> Tuple[np.ndarray, np.ndarray, float]:
         """

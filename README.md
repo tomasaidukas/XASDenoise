@@ -8,7 +8,7 @@ The package also includes advanced denoising techniques based on **Gaussian Proc
 
 ## Features
 - **Gaussian Process**-based denoising for probabilistic signal recovery
-- **Convolutional autoencoder** training and denoising functionality for non-linear noise removal
+- **Convolutional autoencoder** training and denoising pipeline utilizing autoencoder architecture
 - **Stationarity warping** to mitigate signal non-stationarity and improve performance of any denoising method
 - Preprocessing utilities for XAS data
 - Example datasets and Jupyter notebooks included
@@ -37,7 +37,7 @@ The repository includes:
   * `example0_spectrum_object_and_preprocessing.ipynb` — creating and processing spectrum objects
   * `example1_regular_denoiser.ipynb` — basic denoising
   * `example2_gaussian_process_denoiser.ipynb` — Gaussian Process denoising
-  * `example3_encoder_denoiser.ipynb` — autoencoder denoising
+  * `example3_autoencoder_denoiser.ipynb` — autoencoder denoising
   * `example4_time_resolved_data_denoising.ipynb` — time-resolved spectra denoising
 * **`examples/data/`** — example XAS datasets
 

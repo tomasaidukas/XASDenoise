@@ -3,7 +3,8 @@
 # Import and re-export key components
 from .denoisers import (
     RegularDenoiser,
-    EncoderDenoiser,
+    AutoencoderDenoiser,
+    TemporalAutoencoderDenoiser,
     GPDenoiser,
 )
 
@@ -11,6 +12,7 @@ from .denoisers import (
 # from xasdenoise.denoisers import * 
 __all__ = [
     'RegularDenoiser',
-    'EncoderDenoiser', 
+    'AutoencoderDenoiser', 
     'GPDenoiser',
+    'TemporalAutoencoderDenoiser'
 ]

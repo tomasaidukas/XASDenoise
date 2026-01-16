@@ -414,23 +414,23 @@ class DataInterpolator:
         
         # Plot original data
         try:
-            ax1.plot(x1, y1[:, 0] if y1.ndim > 1 else y1, 'b.', markersize=1, label='Original data')
+            ax1.plot(x1, y1[:, 0] if y1.ndim > 1 else y1, '.', markersize=1)
         except:
-            ax1.plot(x1, y1, 'b.', markersize=1, label='Original data')
+            ax1.plot(x1, y1, '.', markersize=1)
         ax1.set_title('Before Interpolation')
         ax1.set_xlabel('X')
         ax1.set_ylabel('Y')
-        ax1.legend()
+        # ax1.legend()
         
         # Plot interpolated data
         try:
-            ax2.plot(x2, y2[:, 0] if y2.ndim > 1 else y2, 'r.', markersize=1, label='Interpolated data')
+            ax2.plot(x2, y2[:, 0] if y2.ndim > 1 else y2, '.', markersize=1)
         except:
-            ax2.plot(x2, y2, 'r.', markersize=1, label='Interpolated data')
+            ax2.plot(x2, y2, '.', markersize=1)
         ax2.set_title('After Interpolation')
         ax2.set_xlabel('X')
         ax2.set_ylabel('Y')
-        ax2.legend()
+        # ax2.legend()
         
         plt.suptitle(title)
         plt.tight_layout()

@@ -32,7 +32,8 @@ class DenoisingProcessor:
         """
         self.config = config
         self.verbose = config.get('verbose', 0)
-    
+        self.denoise_energy_and_time = config.get('denoise_energy_and_time', False)
+        
     def process(self, x: np.ndarray, y: np.ndarray, noise: np.ndarray,
                 denoiser, smoothness: Optional[np.ndarray] = None,
                 data_mask: Optional[np.ndarray] = None,
@@ -63,22 +64,45 @@ class DenoisingProcessor:
         if denoiser is None:
             raise ValueError("Denoiser must be provided")
         
-        # Prepare prediction arrays (full resolution)
-        x_predict = x.copy()
-        noise_predict = noise.copy()
-        
-        # Prepare masked data for denoising
-        masked_data = self._prepare_masked_data(x, y, noise, smoothness, y_reference, data_mask)
-        
-        # Apply the appropriate denoising strategy
-        y_denoised, y_error, y_noise = self._apply_denoising_strategy(
-            masked_data, x_predict, noise_predict, denoiser, edge_energy, x_original
-        )
-        
-        # # Convert to float32 for memory efficiency
-        # y_denoised = self._convert_to_float32(y_denoised)
-        # y_error = self._convert_to_float32(y_error)
-        # y_noise = self._convert_to_float32(y_noise)
+        # Determine axes to denoise
+        if self.denoise_energy_and_time:
+            denoising_axes = [0, 1]
+            print('Denoising along both energy and time axes')
+        else:
+            denoising_axes = [0]
+            
+        # Denoise along specified axes (e.g., energy and/or time using 1D denoiser)
+        for axis in denoising_axes: 
+            
+            # Tranpose data
+            if axis != 0:
+                x = x.T
+                y = y.T
+                noise = noise.T if noise is not None else None
+                smoothness = smoothness.T if smoothness is not None else None
+                y_reference = y_reference.T if y_reference is not None else None
+                data_mask = data_mask.T if data_mask is not None else None
+                
+            # Prepare prediction arrays (full resolution)
+            x_predict = x.copy()
+            noise_predict = noise.copy()
+            
+            # Prepare masked data for denoising
+            masked_data = self._prepare_masked_data(x, y, noise, smoothness, y_reference, data_mask)
+                
+            # Apply the appropriate denoising strategy
+            y_denoised, y_error, y_noise = self._apply_denoising_strategy(
+                masked_data, x_predict, noise_predict, denoiser, edge_energy, x_original
+            )
+            
+            # Override inputs for next axis if needed
+            y = y_denoised.copy()
+            
+            # Transpose back if needed
+            if axis != 0:
+                y_denoised = y_denoised.T
+                y_error = y_error.T
+                y_noise = y_noise.T
         
         return y_denoised, y_error, y_noise
     

@@ -71,7 +71,8 @@ class PipelineConfig:
     # ============ General Parameters ============
     verbose: int = 0
     values_in_ev: bool = True  # if values for windows are in eV, then convert to points (if false, then assume values are in number of points)
-
+    denoise_energy_and_time: bool = False # whether to denoise along both energy and time axes separetely using a 1D denoiser
+    
     def __post_init__(self):
         """Post-initialization validation and setup."""
         self._validate_parameters()
@@ -165,6 +166,7 @@ class PipelineConfig:
     def get_denoising_config(self):
         """Get configuration subset for denoising stage."""
         return {
+            'denoise_energy_and_time': self.denoise_energy_and_time,
             'downsampling_pts': self.downsampling_pts,
             'data_downsampling_method': self.data_downsampling_method,
             'split_xanes_exafs': self.split_xanes_exafs,

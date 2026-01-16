@@ -12,14 +12,14 @@ from typing import Optional
 from xasdenoise.xas_data.spectrum import Spectrum
 
 
-def setup_plot(title: str, figsize: tuple = (8, 6), xlabel: str = 'Energy (eV)', ylabel: str = 'Absorption') -> None:
+def setup_plot(title: str, figsize: tuple = (8, 6), xlabel: str = 'Energy (eV)', ylabel: str = 'Absorption, $\\mu(E)$') -> None:
     """
     Set up the plot with a title and axis labels.
 
     Args:
         title (str): Title of the plot.
         xlabel (str): Label for the x-axis. Defaults to 'Energy (eV)'.
-        ylabel (str): Label for the y-axis. Defaults to 'Absorption'.
+        ylabel (str): Label for the y-axis. Defaults to 'Absorption, $\\mu(E)$'.
     """
     plt.figure(figsize=figsize)
     plt.xlabel(xlabel)
@@ -35,6 +35,7 @@ def legend_exists():
     # Filter out empty labels and underscore labels (matplotlib convention)
     valid_labels = [label for label in labels if label and not label.startswith('_')]
     return len(handles) > 0 and len(valid_labels) > 0
+
 
 def finalize_plot(yax_lim: Optional[tuple] = None, 
                   displace_time_vertically: bool = False,
@@ -56,6 +57,7 @@ def finalize_plot(yax_lim: Optional[tuple] = None,
         plt.tight_layout()
         if yax_lim is not None:
             plt.ylim(yax_lim)
+        plt.tight_layout()
         plt.show()
 
 
@@ -87,7 +89,6 @@ def displace_time_instances_vertically(fig: plt.Figure, offset_increment: float 
             continue
     height = y_data.max() + offset            
 
-    
     # Adjust figure size based on the number of time instances
     # num_instances = len(lines)
     # current_size = fig.get_size_inches()
@@ -104,37 +105,8 @@ def displace_time_instances_vertically(fig: plt.Figure, offset_increment: float 
     plt.tight_layout()
     plt.show()
 
+
 def spectrum_plot(
-    energy: np.ndarray,
-    spectrum: np.ndarray,
-    label: str,
-    crop: Optional[np.ndarray] = None,
-    time_index: Optional[int] = None,
-) -> None:
-    """
-    Helper function to plot spectrum data with appropriate labels.
-
-    Args:
-        energy (np.ndarray): Array of energy values.
-        spectrum (np.ndarray): Array of spectrum values.
-        label (str): Label for the plot.
-        crop (Optional[np.ndarray]): Indices for cropping the data. Defaults to None.
-        time_index (Optional[int]): Specific time index to plot. Defaults to None.
-    """
-    if crop is not None:
-        energy = energy[crop]
-        spectrum = spectrum[crop, :] if spectrum.ndim > 1 else spectrum[crop]
-
-    if time_index is not None:
-        spectrum = spectrum[:, time_index]
-
-    # For time-series, use one label and set others to None
-    labels = label if spectrum.ndim == 1 else [label] + [None] * (spectrum.shape[1] - 1)
-
-    plt.plot(energy, spectrum, label=labels)
-
-
-def spectrum_plot_time_gradient(
     energy: np.ndarray,
     spectrum: np.ndarray,
     label: str,
@@ -158,11 +130,16 @@ def spectrum_plot_time_gradient(
         energy = energy[crop]
         spectrum = spectrum[crop, :] if spectrum.ndim > 1 else spectrum[crop]
 
-    if time_index is not None:
-        spectrum = spectrum[:, time_index]
-
-    # If gradient is requested and we have time-series data, plot with colors from colormap
+    # If we have time-series data
     if spectrum.ndim > 1:
+        
+        # Get labels for the time instances
+        if time_index is not None:
+            spectrum = spectrum[:, time_index]
+            time_labels = time_index
+        else:
+            time_labels = np.arange(spectrum.shape[1])
+            
         cmap_obj = plt.get_cmap(cmap)
         n_times = spectrum.shape[1]
         colors = [cmap_obj(i / max(1, n_times - 1)) for i in range(n_times)]
@@ -171,25 +148,27 @@ def spectrum_plot_time_gradient(
         for idx in range(n_times):
             y = spectrum[:, idx]
             line_label = label if idx == 0 else None  # Only label the first line
-            plt.plot(energy, y, color=colors[idx], label=line_label, alpha=0.5)
+            plt.plot(energy, y, color=colors[idx], label=line_label, alpha=0.8)
         
         # Add colorbar with proper axes reference
         sm = plt.cm.ScalarMappable(cmap=cmap_obj, norm=plt.Normalize(vmin=0, vmax=n_times-1))
         sm.set_array([])
         cbar = plt.colorbar(sm, ax=plt.gca(), label='Time Instance')
+        
         # Set colorbar ticks to show actual time indices
         if n_times <= 10:
             cbar.set_ticks(range(n_times))
-            cbar.set_ticklabels([str(i) for i in range(n_times)])
+            cbar.set_ticklabels([str(time_labels[i]) for i in range(n_times)])
         else:
             # For many time instances, show fewer ticks
             tick_indices = np.linspace(0, n_times-1, 5).astype(int)
             cbar.set_ticks(tick_indices)
-            cbar.set_ticklabels([str(i) for i in tick_indices])
+            cbar.set_ticklabels([str(time_labels[i]) for i in tick_indices])
     else:
         # Standard plotting behavior
         labels = label if spectrum.ndim == 1 else [label] + [None] * (spectrum.shape[1] - 1)
         plt.plot(energy, spectrum, label=labels)
+
 
 def descriptor_plot(val: float, descriptor: str, colors: str) -> None:
     """
@@ -230,8 +209,10 @@ def get_crop(energy: np.ndarray, edge: float, crop_min: int, crop_max: int) -> n
     Returns:
         np.ndarray: Indices for cropping the data.
     """
-    edge_idx0 = np.argmin(abs(energy - crop_min))
-    edge_idx1 = np.argmin(abs(energy - crop_max))
+    dE = energy - edge
+    edge_idx0 = np.argmin(abs(dE - crop_min))
+    edge_idx1 = np.argmin(abs(dE - crop_max))
+    
     return np.arange(edge_idx0, edge_idx1)
 
 
@@ -248,6 +229,7 @@ def plot_spectrum(
     crop_max: Optional[int] = None,
     remove_labels: bool = False,
     center_on_edge: bool = False,
+    figsize: tuple = (8, 6)
 ) -> None:
     """
     Plot a single spectrum.
@@ -262,7 +244,7 @@ def plot_spectrum(
         remove_labels (bool): Whether to remove labels. Defaults to False.
         center_on_edge (bool): Whether to center the plot on the edge. Defaults to False.
     """
-    setup_plot(title)
+    setup_plot(title, figsize)
     
     label = None if remove_labels else getattr(data, 'compound', '__nolegend__')
     crop = get_crop(data.energy, data.edge, crop_min or 0, crop_max or 0) if crop_min or crop_max else None
@@ -286,6 +268,7 @@ def plot_spectrum_edge(
     time_index: Optional[int] = None,
     crop_min: int = 50,
     crop_max: int = 50,
+    figsize: tuple = (8, 6)
 ) -> None:
     """
     Plot the spectrum edge for a single Spectrum object.
@@ -298,7 +281,7 @@ def plot_spectrum_edge(
         crop_min (int): Minimum crop around the edge. Defaults to 50.
         crop_max (int): Maximum crop around the edge. Defaults to 50.
     """
-    setup_plot(title)
+    setup_plot(title, figsize)
     
     crop = get_crop(data.energy, data.edge, crop_min, crop_max)
     label = getattr(data, 'compound', '__nolegend__')
@@ -319,6 +302,7 @@ def plot_spectrum_background(
     time_index: Optional[int] = None,
     crop_min: Optional[int] = None,
     crop_max: Optional[int] = None,
+    figsize: tuple = (8, 6)
 ) -> None:
     """
     Plot the background region for a single Spectrum object.
@@ -331,7 +315,7 @@ def plot_spectrum_background(
         crop_min (Optional[int]): Minimum crop around the edge. Defaults to None.
         crop_max (Optional[int]): Maximum crop around the edge. Defaults to None.
     """
-    setup_plot(title)
+    setup_plot(title, figsize)
     
     crop = get_crop(data.energy, data.edge, crop_min or 0, crop_max or 0) if crop_min or crop_max else None
     label = getattr(data, 'compound', '__nolegend__')
@@ -350,6 +334,7 @@ def plot_spectrum_xanes(
     data: Spectrum,
     title: str = 'XANES region',
     time_averaged: bool = True,
+    figsize: tuple = (8, 6)
 ) -> None:
     """
     Plot the XANES region for a single Spectrum object.
@@ -359,7 +344,7 @@ def plot_spectrum_xanes(
         title (str): Title of the plot. Defaults to 'XANES region'.
         time_averaged (bool): Whether to plot the time-averaged spectrum. Defaults to True.
     """
-    setup_plot(title)
+    setup_plot(title, figsize)
     
     label = getattr(data, 'compound', '__nolegend__')
     
@@ -376,6 +361,7 @@ def plot_spectrum_exafs(
     data: Spectrum,
     title: str = 'EXAFS region',
     time_averaged: bool = True,
+    figsize: tuple = (8, 6)
 ) -> None:
     """
     Plot the EXAFS region for a single Spectrum object.
@@ -385,7 +371,7 @@ def plot_spectrum_exafs(
         title (str): Title of the plot. Defaults to 'EXAFS region'.
         time_averaged (bool): Whether to plot the time-averaged spectrum. Defaults to True.
     """
-    setup_plot(title)
+    setup_plot(title, figsize)
     
     label = getattr(data, 'compound', '__nolegend__')
     
@@ -402,9 +388,10 @@ def plot_spectrum_descriptor(
     data: Spectrum,
     descriptor: str,
     title: str = 'Spectrum with descriptor',
-    crop_min: int = 50,
+    crop_min: int = -50,
     crop_max: int = 50,
     time_averaged: bool = True,
+    figsize: tuple = (8, 6)
 ) -> None:
     """
     Plot the spectrum with a descriptor for a single Spectrum object.
@@ -417,7 +404,7 @@ def plot_spectrum_descriptor(
         crop_max (int): Maximum crop around the edge. Defaults to 50.
         time_averaged (bool): Whether to plot the time-averaged spectrum. Defaults to True.
     """
-    setup_plot(title)
+    setup_plot(title, figsize)
     
     crop = get_crop(data.energy, data.edge, crop_min, crop_max)
     label = getattr(data, 'compound', '__nolegend__')
@@ -438,13 +425,14 @@ def plot_spectrum_descriptor(
 def plot_spectrum_time_instances(
     data: Spectrum,
     title: str = '',
+    displace_vertically: bool = True,
     time_instance_number: int = 10,
     vertical_displacement_offset: Optional[float] = None,
     time_binning_size: Optional[int] = None,
     crop_min: Optional[int] = None,
     crop_max: Optional[int] = None,
-    plot_gradient: bool = False,
     cmap: str = 'plasma',
+    figsize: tuple = (8, 6)
 ) -> None:
     """
     Plot time instances for a single Spectrum object.
@@ -458,7 +446,7 @@ def plot_spectrum_time_instances(
         crop_min (Optional[int]): Minimum crop around the edge. Defaults to None.
         crop_max (Optional[int]): Maximum crop around the edge. Defaults to None.
     """
-    setup_plot(title)
+    setup_plot(title, figsize)
 
     label = getattr(data, 'compound', '__nolegend__')
     crop = get_crop(data.energy, data.edge, crop_min or 0, crop_max or 0) if crop_min or crop_max else None
@@ -479,11 +467,9 @@ def plot_spectrum_time_instances(
         data = data.copy()
         data.bin_time_instances(time_binning_size)
                 
-    if plot_gradient:
-        spectrum_plot_time_gradient(data.energy, data.spectrum, label, crop, time_indices, cmap)
-    else:
-        spectrum_plot(data.energy, data.spectrum, label, crop, time_indices)
+    spectrum_plot(data.energy, data.spectrum, label, crop, time_indices, cmap)
         
+    if displace_vertically:
         fig = plt.gcf()
         displace_time_instances_vertically(fig, vertical_displacement_offset, labels)
 
@@ -527,8 +513,9 @@ def plot_time_evolution_3d(
 
     ax.set_xlabel('Energy (eV)')
     ax.set_ylabel('Time')
-    ax.set_zlabel('Absorption')
+    ax.set_zlabel(r'Absorption, $\mu(E)$')
     ax.set_title(title)
 
     ax.view_init(elev=20, azim=-70)
+    plt.tight_layout()
     plt.show()

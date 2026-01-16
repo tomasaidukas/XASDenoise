@@ -1264,29 +1264,47 @@ def remove_glitches(x, y, glitch_mask, plot=False, mode='interp'):
             y_avg = np.mean(y, axis=1)
             y_avg = gaussian_filter1d(y_avg, sigma=5)
             
-            # f = interp1d(x[data_mask], y_avg[data_mask], kind='slinear',
-            #             bounds_error=False, axis=0, fill_value=(y_avg[0],y_avg[-1]))
-            f = PchipInterpolator(x[data_mask], y_avg[data_mask], axis=0)
+            # Disable extrapolation to avoid edge artifacts
+            f = PchipInterpolator(x[data_mask], y_avg[data_mask], axis=0, extrapolate=False)
             y_avg = f(x)
             
             # replace glitch regions from the averaged and interpolated array
             y[glitch_mask,:] = y_avg[glitch_mask, np.newaxis]
             
         elif mode == 'interp':
-            # scipy.interp1d - interp an N-dimensional array along an axis, good for qexafs data:
+            # scipy.interp1d - interp an N-dimensional array along an axis, good for qexafs data
+            # Use fill_value=np.nan to avoid extrapolation artifacts
             f = interp1d(x[data_mask], y[data_mask,:], kind='slinear',
-                        bounds_error=False, axis=0, fill_value=(y[0,:],y[-1,:]))
+                        bounds_error=False, axis=0, fill_value=np.nan)
             y = f(x)
         
         elif mode == 'pchip':
-            f = PchipInterpolator(x[data_mask], y[data_mask, :], axis=0)
+            # Disable extrapolation to avoid edge artifacts
+            f = PchipInterpolator(x[data_mask], y[data_mask, :], axis=0, extrapolate=False)
             y = f(x)
         
         elif mode == 'spline':
+            # UnivariateSpline - smooth spline interpolation
+            # ext=3 returns boundary value outside bounds (no extrapolation)
             for t in range(y.shape[1]):
-                # UnivariateSpline - smooth spline interpolation
-                spline = UnivariateSpline(x[data_mask], y[data_mask,t], s=0, k=3)
+                spline = UnivariateSpline(x[data_mask], y[data_mask,t], s=0, k=3, ext=3)
                 y[:,t] = spline(x)
+        
+        # Generic NaN handling: replace any NaN values with nearest valid boundary values
+        # This handles edge cases where extrapolation is disabled
+        for col in range(y.shape[1]):
+            nan_mask = np.isnan(y[:, col])
+            if np.any(nan_mask):
+                valid_indices = np.where(~nan_mask)[0]
+                if len(valid_indices) > 0:
+                    first_valid = valid_indices[0]
+                    last_valid = valid_indices[-1]
+                    # Fill leading NaNs with first valid value
+                    if first_valid > 0:
+                        y[:first_valid, col] = y[first_valid, col]
+                    # Fill trailing NaNs with last valid value
+                    if last_valid < len(y) - 1:
+                        y[last_valid+1:, col] = y[last_valid, col]
             
     if plot:
         plt.figure()

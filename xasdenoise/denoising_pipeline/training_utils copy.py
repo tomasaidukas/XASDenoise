@@ -4,7 +4,7 @@ Prepare training data for the autoencoder model.
 
 import numpy as np
 from xasdenoise.denoising_pipeline import PipelineConfig, DenoisingPipeline
-from xasdenoise.denoising_methods.denoisers import AutoencoderDenoiser, TemporalAutoencoderDenoiser
+from xasdenoise.denoising_methods.denoisers import AutoencoderDenoiser
 from sklearn.model_selection import train_test_split
 import tqdm
 
@@ -41,29 +41,22 @@ def process_training_data(spectrum_obj, config=None, denoiser=None):
     return preprocessed_data
 
 def create_noise2noise_data(spectrum_obj, config=None, denoiser=None, 
-                           pairing_strategy='adjacent', pair_window_size=1):
+                           pairing_strategy='adjacent', max_time_gap=1):
     """
     Create noise2noise training data from the preprocessed data.
 
-    Here we assume that the input spectrum is a 2D array of (energy, noisy observations). 
-    One option is to use average the noisy observatiobns and obtain an estimate of the clean spectrum.
-    This option is used for noise2clean training data.
-    
-    For noise2noise training data, we create pairs of noisy observations.
-    The pairing strategy can be:
-        - 'adjacent': Only pair consecutive observations
-        - 'window': Pair each observation with neighbors within pair_window_size
-        - 'all_pairs': All unique pairwise combinations
+    Here we assume that the input spectrum time series contains many noisy observations of the same underlying signal.
+    The spectrum doesn't have a to be a time series and could be a series of repeated noisy measurements of the same sample.
     
     Args:
-        spectrum_obj: Spectrum object with multiple noisy observations (energy, noisy observations)
+        spectrum_obj: Spectrum object with multiple time instances
         config: Pipeline configuration object
         denoiser: Optional denoiser for preprocessing
         pairing_strategy: 'adjacent', 'window', or 'all_pairs'
-            - 'adjacent': Only pair consecutive observations
-            - 'window': Pair each observation with neighbors within pair_window_size
+            - 'adjacent': Only pair consecutive time instances 
+            - 'window': Pair each instance with neighbors within max_time_gap
             - 'all_pairs': All unique pairwise combinations (for temporally stable data)
-        pair_window_size: The number of observations to be paired within a given window (default=1 for adjacent)
+        max_time_gap: Maximum time gap for 'window' strategy (default=1 for adjacent)
     
     Returns:
         dict: Processed data with y_train and y_target pairs
@@ -71,108 +64,103 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
     
     processed_data = process_training_data(spectrum_obj, config, denoiser)
     
-    y_data = processed_data.get('y')  # Shape: (n_energy, n_pairs)
-    n_energy, n_pairs0 = y_data.shape
+    y_data = processed_data.get('y')  # Shape: (n_energy, n_time)
+    n_energy, n_time = y_data.shape
     
-    if pair_window_size > 1:
-        pair_window_size = pair_window_size // 2
-        
     # Create pairs based on strategy
     if pairing_strategy == 'adjacent':
-        # Pair adjacent observations only
+        # Pair adjecent time instances only
         y_train_list = []
         y_target_list = []
-        y_pair_indices = []
+        y_time_indices = []
         
-        for t in range(n_pairs0 - 1):
-            # Pair sequential observations
+        for t in range(n_time - 1):
+            # Pair sequential time instances
             y_train_list.append(y_data[:, t])
             y_target_list.append(y_data[:, t + 1])
-            y_pair_indices.append(t)
+            y_time_indices.append(t)
 
             # Make sure A = denoise(B) and B = denoise(A)
             y_target_list.append(y_data[:, t])
             y_train_list.append(y_data[:, t + 1])
-            y_pair_indices.append(t)
+            y_time_indices.append(t)
     
     elif pairing_strategy == 'sequential':
-        # Pair sequential observations only
-        # This is similar to 'adjacent' but does not create reverse pairs
-        # This is useful for sequential data where we want to predict the next observation
+        # Pair sequential time instances only
         y_train_list = []
         y_target_list = []
-        y_pair_indices = []
+        y_time_indices = []
         
-        for t in range(n_pairs0 - 1):
+        for t in range(n_time - 1):
             y_train_list.append(y_data[:, t])
             y_target_list.append(y_data[:, t + 1])
-            y_pair_indices.append(t)
+            y_time_indices.append(t)
               
     elif pairing_strategy == 'window_sequential':
-        # Pair each observation with neighbors within a window
+        # Pair each instance with neighbors within a window
         y_train_list = []
         y_target_list = []
-        y_pair_indices = []
+        y_time_indices = []
 
-        for t in range(n_pairs0):
+        for t in range(n_time):
             # Define window boundaries
-            t_min = max(0, t - pair_window_size)
-            t_max = min(n_pairs0, t + pair_window_size + 1)
+            t_min = max(0, t - max_time_gap)
+            t_max = min(n_time, t + max_time_gap + 1)
 
             # Pair with all neighbors in window (excluding self)
             for t_neighbor in range(t_min, t_max):
                 if t_neighbor != t:  # Exclude self-pairing
                     y_train_list.append(y_data[:, t])
                     y_target_list.append(y_data[:, t_neighbor])
-                    # Keep track of original observation index such that we can identify
+                    # Keep track of original time index such that we can identify
                     # which pairs belong together
-                    y_pair_indices.append(t) 
+                    y_time_indices.append(t) 
     
     elif pairing_strategy == 'window':
-        # Pair each observation with neighbors within a window
+        # Pair each instance with neighbors within a window
         y_train_list = []
         y_target_list = []
-        y_pair_indices = []
+        y_time_indices = []
 
-        for t in range(n_pairs0):
+        for t in range(n_time):
             # Define window boundaries
-            t_min = max(0, t - pair_window_size)
-            t_max = min(n_pairs0, t + pair_window_size + 1)
+            t_min = max(0, t - max_time_gap)
+            t_max = min(n_time, t + max_time_gap + 1)
 
             # Pair with all neighbors in window (excluding self)
             for t_neighbor in range(t_min, t_max):
                 if t_neighbor != t:  # Exclude self-pairing
                     y_train_list.append(y_data[:, t])
                     y_target_list.append(y_data[:, t_neighbor])
-                    # Keep track of original observation index such that we can identify
+                    # Keep track of original time index such that we can identify
                     # which pairs belong together
-                    y_pair_indices.append(t) 
+                    y_time_indices.append(t) 
                     
                     # Also add the reverse pair for symmetry
                     # Make sure A = denoise(B) and B = denoise(A)
                     y_train_list.append(y_data[:, t_neighbor])
                     y_target_list.append(y_data[:, t])
-                    # Keep track of original observation index such that we can identify
+                    # Keep track of original time index such that we can identify
                     # which pairs belong together
-                    y_pair_indices.append(t) 
+                    y_time_indices.append(t) 
                             
     elif pairing_strategy == 'all_pairs':
         # All unique pairwise combinations (for temporally stable ex-situ data)
         y_train_list = []
         y_target_list = []
-        y_pair_indices = []
+        y_time_indices = []
         
-        for i in range(n_pairs0):
-            for j in range(i + 1, n_pairs0):
+        for i in range(n_time):
+            for j in range(i + 1, n_time):
                 # Add pair (i, j)
                 y_train_list.append(y_data[:, i])
                 y_target_list.append(y_data[:, j])
-                y_pair_indices.append(i)
+                y_time_indices.append(i)
                         
                 # Add reverse pair (j, i) for symmetry
                 y_train_list.append(y_data[:, j])
                 y_target_list.append(y_data[:, i])
-                y_pair_indices.append(j)
+                y_time_indices.append(j)
     else:
         raise ValueError(f"Invalid pairing_strategy: {pairing_strategy}. "
                         f"Choose 'adjacent', 'window', or 'all_pairs'.")
@@ -182,7 +170,8 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
     # Convert lists to arrays
     processed_data['y_train'] = np.array(y_train_list)  # Shape: (n_pairs, n_energy)
     processed_data['y_target'] = np.array(y_target_list)  # Shape: (n_pairs, n_energy)
-    processed_data['y_pair_indices'] = np.array(y_pair_indices)
+    processed_data['y_time_indices'] = np.array(y_time_indices)
+    print(processed_data['y_train'].shape)
     
     # Replicate other arrays to match number of pairs
     processed_data['x'] = np.repeat(processed_data.get('x')[None, :], n_pairs, axis=0)
@@ -208,10 +197,10 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
     # Print statistics
     print(f"Pairing strategy: {pairing_strategy}")
     if pairing_strategy == 'window':
-        print(f"  Pairing window size: {pair_window_size}")
-    print(f"  Number of observations: {n_pairs0}")
+        print(f"  Max time gap: {max_time_gap}")
+    print(f"  Time instances: {n_time}")
     print(f"  Training pairs: {n_pairs}")
-    print(f"  Data augmentation factor: {n_pairs / n_pairs0:.1f}x")
+    print(f"  Data augmentation factor: {n_pairs / n_time:.1f}x")
     
     return processed_data
 
@@ -219,13 +208,11 @@ def create_noise2clean(spectrum_obj, config=None, denoiser=None):
     """
     Create noise2clean training data from the preprocessed data.
 
-    Here we assume that the input spectrum contains many noisy 
-    observations of the same underlying signal.
+    Here we assume that the input spectrum time series contains many noisy observations of the same underlying signal.
     """
     
-    # In noise2clean, target is the clean spectrum. Here we assume that for every spectrum 
-    # we have multiple noisy observations passed as a 2D array containing (energy, pairs). 
-    # Therefore, the clean spectrum is approximated as an average of all noisy observations.
+    # In noise2clean, target is the clean spectrum, which will be taken as the time-averaged spectrum
+    # and can also be pre-denoised. Do not denoise the training data (it must be noisy)
     processed_data = process_training_data(spectrum_obj, config)
     y_train = processed_data.get('y')
 
@@ -233,36 +220,36 @@ def create_noise2clean(spectrum_obj, config=None, denoiser=None):
         processed_data = process_training_data(spectrum_obj, config, denoiser)
     y_target = processed_data.get('y')
     
-    # Target dataset will be the the average of all noisy observations within a given spectrum
+    # Target dataset will be the the time-averaged spectrum
     processed_data['y_train'] = y_train.T
     processed_data['y_target'] = np.repeat(np.mean(y_target, axis=1)[:, None], y_train.shape[1], axis=1).T
     
     # Create the other arrays through replication for training
-    num_pairs = processed_data['y_train'].shape[0]
+    num_times = processed_data['y_train'].shape[0]
     
-    processed_data['x'] = np.repeat(processed_data.get('x')[None, :], num_pairs, axis=0)
+    processed_data['x'] = np.repeat(processed_data.get('x')[None, :], num_times, axis=0)
     if processed_data.get('data_mask') is not None:
-        processed_data['data_mask'] = np.repeat(processed_data.get('data_mask')[None, :], num_pairs, axis=0)
+        processed_data['data_mask'] = np.repeat(processed_data.get('data_mask')[None, :], num_times, axis=0)
     
     try:
-        processed_data['compounds'] = np.repeat([spectrum_obj.metadata['compound']], num_pairs, axis=0)
+        processed_data['compounds'] = np.repeat([spectrum_obj.metadata['compound']], num_times, axis=0)
     except:
         pass
     
     try:
-        processed_data['elements'] = np.repeat([spectrum_obj.metadata['element']], num_pairs, axis=0)
+        processed_data['elements'] = np.repeat([spectrum_obj.metadata['element']], num_times, axis=0)
     except:
         pass
     
     try:
-        processed_data['edges'] = np.repeat([spectrum_obj.edge], num_pairs, axis=0)
+        processed_data['edges'] = np.repeat([spectrum_obj.edge], num_times, axis=0)
     except:
         pass
     
     return processed_data
 
 def prepare_training_data(spectrum_obj_list, config=None, denoiser=None, 
-                          method='noise2noise', pairing_strategy='adjacent', pair_window_size=1):
+                          method='noise2noise', pairing_strategy='adjacent', max_time_gap=1):
     """
     Prepare training data for the autoencoder model. 
     
@@ -273,23 +260,21 @@ def prepare_training_data(spectrum_obj_list, config=None, denoiser=None,
         config (PipelineConfig): Pipeline configuration object for data processing.
         denoiser (Denoiser): Denoiser object for denoising the data.
         method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
-        pairing_strategy (str): Pairing strategy for noise2noise ('adjacent', 'window', 'all_pairs').
-        pair_window_size (int): Maximum index gap for 'window' pairing strategy.
     """
-    valid_keys = ['x', 'y_train', 'y_target', 'y_pair_indices', 'data_mask', 'compounds', 'elements', 'edges']
+    valid_keys = ['x', 'y_train', 'y_target', 'y_time_indices', 'data_mask', 'compounds', 'elements', 'edges']
     processed_data_lists = {}
     
     if not isinstance(spectrum_obj_list, list):
         spectrum_obj_list = [spectrum_obj_list]
 
-    if method == 'noise2clean' and (pairing_strategy != 'adjacent' or pair_window_size != 1):
-        print("Warning: 'pairing_strategy' and 'pair_window_size' are ignored in 'noise2clean' method.")
+    if method == 'noise2clean' and (pairing_strategy != 'adjacent' or max_time_gap != 1):
+        print("Warning: 'pairing_strategy' and 'max_time_gap' are ignored in 'noise2clean' method.")
         
     # First, collect all arrays in lists
     tqdm_iterator = tqdm.tqdm(spectrum_obj_list, desc="Processing spectra for training data")
     for idx, spectrum_obj in enumerate(tqdm_iterator):
         if method == 'noise2noise':
-            processed_data = create_noise2noise_data(spectrum_obj, config, denoiser, pairing_strategy, pair_window_size)
+            processed_data = create_noise2noise_data(spectrum_obj, config, denoiser, pairing_strategy, max_time_gap)
         elif method == 'noise2clean':
             processed_data = create_noise2clean(spectrum_obj, config, denoiser)
         else:
@@ -431,7 +416,7 @@ def _pad_arrays_to_same_length(x0, y_train0, y_target0, data_mask0, edges0):
     return x0, y_train0, y_target0, data_mask0
 
 def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, method='noise2noise',
-                        pairing_strategy='adjacent', pair_window_size=1,
+                        pairing_strategy='adjacent', max_time_gap=1,
                         model_params=None, training_params=None):
     """
     Prepare training data and train the autoencoder model.
@@ -442,7 +427,7 @@ def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=Non
         denoiser_preproc (Denoiser): Denoiser object for denoising the data during preprocessing.
         method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
         pairing_strategy (str): Pairing strategy for noise2noise ('adjacent', 'window', 'all_pairs').
-        pair_window_size (int): Window size within which the data are paired.
+        max_time_gap (int): Maximum time gap for 'window' pairing strategy.
         model_path (str): Path to save the trained model.
         training_params (dict): Dictionary of training parameters.
         
@@ -456,7 +441,7 @@ def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=Non
         )
         
     processed_data = prepare_training_data(spectrum_obj_list, config, denoiser_preproc, method=method,
-                                           pairing_strategy=pairing_strategy, pair_window_size=pair_window_size)
+                                           pairing_strategy=pairing_strategy, max_time_gap=max_time_gap)
 
     # Parameter which determines if data should be shuffled
     if pairing_strategy == 'window':
@@ -465,84 +450,6 @@ def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=Non
         dont_shuffle = False
         
     # Model initialization parameters with defaults
-    model_params = {
-        'model_type': model_params.get('model_type', 'conv'),
-        'device': model_params.get('device', 'auto'),
-        'gpu_index': model_params.get('gpu_index', None),
-        'num_layers': model_params.get('num_layers', 4),
-        'kernel_size': model_params.get('kernel_size', 11),
-        'dropout_rate': model_params.get('dropout_rate', 0),
-        'channels': model_params.get('channels', None),
-        'normalization_method': model_params.get('normalization_method', None),
-        'bias': model_params.get('bias', False),
-        'output_mode': model_params.get('output_mode', 'direct'),
-        'output_nonnegativity': model_params.get('output_nonnegativity', False),
-        'transpose_input': model_params.get('transpose_input', False)
-    }
-    
-    # Training parameters with defaults
-    training_params = {
-        'batch_size': training_params.get('batch_size', 16),
-        'num_epochs': training_params.get('num_epochs', 100),
-        'learning_rate': training_params.get('learning_rate', 1e-4),
-        'augment_data': training_params.get('augment_data', False),
-        'remove_padded_regions': training_params.get('remove_padded_regions', False),
-        'save_path': training_params.get('save_path', None),
-        'early_stopping_patience': training_params.get('early_stopping_patience', 50),
-        'weight_decay': training_params.get('weight_decay', 1e-5),
-        'loss_weights': training_params.get('loss_weights', None),
-        'dont_shuffle': training_params.get('dont_shuffle', dont_shuffle)
-    }
-
-    # Define model type and initialize the denoiser
-    denoiser = AutoencoderDenoiser(**model_params)
-
-    # Train the model
-    training_metrics = denoiser.train_model(
-        y_train=processed_data['y_train'],  # Noisy spectra as input
-        y_target=processed_data['y_target'],  # Clean spectra as target
-        mask_train=processed_data['data_mask'],  # Data mask
-        **training_params
-    )
-
-    return denoiser, training_metrics
-
-
-def train_temporal_autoencoder_model(spectrum_time_series, config=None, denoiser_preproc=None, method='noise2noise',
-                        pairing_strategy='adjacent', pair_window_size=1,
-                        model_params=None, training_params=None):
-    """
-    Prepare training data and train the autoencoder model.
-    
-    Args:
-        spectrum_time_series (Spectrum): A Spectrum object containing the time series data as a 2D array (spectrum_time_series.spectrum.shape = (energy_points, time_steps)).
-        config (PipelineConfig): Pipeline configuration object for data processing.
-        denoiser_preproc (Denoiser): Denoiser object for denoising the data during preprocessing.
-        method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
-        pairing_strategy (str): Pairing strategy for noise2noise ('adjacent', 'window', 'all_pairs').
-        pair_window_size (int): Window size within which the data are paired.
-        model_path (str): Path to save the trained model.
-        training_params (dict): Dictionary of training parameters.
-        
-    Returns:
-        EncoderModel: Trained autoencoder model.
-    """
-    if config is None:
-        # Create a default pipeline configuration
-        config = PipelineConfig(
-            verbose=0,
-        )
-        
-    processed_data = prepare_training_data(spectrum_time_series, config, denoiser_preproc, method=method,
-                                           pairing_strategy=pairing_strategy, pair_window_size=pair_window_size)
-
-    # Parameter which determines if data should be shuffled
-    if pairing_strategy == 'window':
-        dont_shuffle = True
-    else:
-        dont_shuffle = False
-        
-        # Model initialization parameters with defaults
     model_params = {
         'model_type': model_params.get('model_type', 'conv'),
         'device': model_params.get('device', 'auto'),
@@ -577,19 +484,102 @@ def train_temporal_autoencoder_model(spectrum_time_series, config=None, denoiser
     }
 
     # Define model type and initialize the denoiser
-    denoiser = TemporalAutoencoderDenoiser(**model_params)
+    denoiser = AutoencoderDenoiser(**model_params)
 
     # Train the model
     training_metrics = denoiser.train_model(
         y_train=processed_data['y_train'],  # Noisy spectra as input
         y_target=processed_data['y_target'],  # Clean spectra as target
         mask_train=processed_data['data_mask'],  # Data mask
-        y_pair_indices=processed_data.get('y_pair_indices', None),  # Pair indices
+        y_time_indices=processed_data.get('y_time_indices', None),  # Time indices for pairing
         **training_params
     )
 
     return denoiser, training_metrics
 
+
+def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=None, method='noise2noise',
+                        pairing_strategy='adjacent', max_time_gap=1,
+                        model_params=None, training_params=None):
+    """
+    Prepare training data and train the autoencoder model.
+    
+    Args:
+        spectrum_obj (Spectrum or list): A Spectrum object or a list of Spectrum objects containing the spectrum data.
+        config (PipelineConfig): Pipeline configuration object for data processing.
+        denoiser_preproc (Denoiser): Denoiser object for denoising the data during preprocessing.
+        method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
+        pairing_strategy (str): Pairing strategy for noise2noise ('adjacent', 'window', 'all_pairs').
+        max_time_gap (int): Maximum time gap for 'window' pairing strategy.
+        model_path (str): Path to save the trained model.
+        training_params (dict): Dictionary of training parameters.
+        
+    Returns:
+        EncoderModel: Trained autoencoder model.
+    """
+    if config is None:
+        # Create a default pipeline configuration
+        config = PipelineConfig(
+            verbose=0,
+        )
+        
+    processed_data = prepare_training_data(spectrum_obj_list, config, denoiser_preproc, method=method,
+                                           pairing_strategy=pairing_strategy, max_time_gap=max_time_gap)
+
+    # Parameter which determines if data should be shuffled
+    if pairing_strategy == 'window':
+        dont_shuffle = True
+    else:
+        dont_shuffle = False
+        
+    # Model initialization parameters with defaults
+    model_params = {
+        'model_type': model_params.get('model_type', 'conv'),
+        'device': model_params.get('device', 'auto'),
+        'gpu_index': model_params.get('gpu_index', None),
+        'num_layers': model_params.get('num_layers', 4),
+        'kernel_size': model_params.get('kernel_size', 11),
+        'time_kernel_size': model_params.get('time_kernel_size', 11),
+        'dropout_rate': model_params.get('dropout_rate', 0),
+        'channels': model_params.get('channels', None),
+        'normalization_method': model_params.get('normalization_method', None),
+        'bias': model_params.get('bias', False),
+        'output_mode': model_params.get('output_mode', 'direct'),
+        'output_nonnegativity': model_params.get('output_nonnegativity', False),
+        'transpose_input': model_params.get('transpose_input', False)
+    }
+    
+    # Training parameters with defaults
+    training_params = {
+        'batch_size': training_params.get('batch_size', 16),
+        'num_epochs': training_params.get('num_epochs', 100),
+        'learning_rate': training_params.get('learning_rate', 1e-4),
+        'augment_data': training_params.get('augment_data', False),
+        'remove_padded_regions': training_params.get('remove_padded_regions', False),
+        'save_path': training_params.get('save_path', None),
+        'early_stopping_patience': training_params.get('early_stopping_patience', 50),
+        'weight_decay': training_params.get('weight_decay', 1e-5),
+        'loss_weights': training_params.get('loss_weights', None),
+        'temporal_smoothness_lambda': training_params.get('temporal_smoothness_lambda', 0.0),
+        'static_region_mask': training_params.get('static_region_mask', None),
+        'static_region_weight': training_params.get('static_region_weight', 1.0),
+        'dont_shuffle': training_params.get('dont_shuffle', dont_shuffle)
+    }
+
+    # Define model type and initialize the denoiser
+    denoiser = AutoencoderDenoiser(**model_params)
+
+    # Train the model
+    training_metrics = denoiser.train_model(
+        y_train=processed_data['y_train'],  # Noisy spectra as input
+        y_target=processed_data['y_target'],  # Clean spectra as target
+        mask_train=processed_data['data_mask'],  # Data mask
+        y_time_indices=processed_data.get('y_time_indices', None),  # Time indices for pairing
+        **training_params
+    )
+
+    return denoiser, training_metrics
+           
 def split_by_compounds(compounds, compounds_for_test=[], compounds_to_exclude=[], train_frac=0.9, val_frac=0.05, test_frac=0.05, random_state=42):
     """
     Split data into train, validation, and test sets by compounds.
@@ -683,7 +673,7 @@ def split_by_compounds(compounds, compounds_for_test=[], compounds_to_exclude=[]
     val_indices = np.array(val_indices)
     test_indices = np.array(test_indices)
     
-    # For testing take just one observation for each compound
+    # For testing take just one time instance for each compound
     test_indices = np.unique(np.array([np.where(np.array(compounds) == c)[0][0] for c in test_compounds]))
     
     print(f"Number of unique compounds: {len(unique_compounds)}")

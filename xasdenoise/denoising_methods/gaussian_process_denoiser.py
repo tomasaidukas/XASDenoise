@@ -156,10 +156,7 @@ class GPDenoiser:
 
         # Save initial state
         self._initial_state = self._get_current_state()
-
-        # Temporal data denoising
-        self.joint_temporal_optimization = False
-
+        
         warnings.filterwarnings("ignore", category=GPInputWarning)
         # warnings.filterwarnings("ignore", category=NumericalWarning,
         #                       message="Very small noise values detected")
@@ -483,7 +480,7 @@ class GPDenoiser:
         if weights is not None:
             self.weights = self._to_tensor(weights)
     
-        # Ensure 2D format for time-series data
+        # Ensure 2D format for (can accomodate time-series data)
         if self.y_train.dim() == 1:
             self.y_train = self.y_train[:, None]
         if self.noise_train.dim() == 1:
@@ -618,83 +615,6 @@ class GPDenoiser:
         y_noise = y_noise * y_range
         y_err = y_err * y_range
         return y_denoised, y_err, y_noise
-    
-    def train_joint_temporal(self):
-        """Advanced joint temporal training with better hyperparameter sharing."""
-        if self.y_train.dim() == 1:
-            self.y_train = self.y_train[:, None]
-        
-        n_time = self.y_train.shape[1]
-        
-        # Initialize models for all time instances
-        models = []
-        likelihoods = []
-        optimizers = []
-        
-        for t in range(n_time):
-            self.initialize_model(time=t)
-            models.append(copy.deepcopy(self.model))
-            likelihoods.append(copy.deepcopy(self.likelihood))
-            optimizers.append(torch.optim.Adam(models[t].parameters(), lr=self.lr))
-        
-        self.training_metrics = self.initialize_training_metrics()
-
-        # Training loop with shared hyperparameter updates
-        for i in range(self.training_iter):
-            total_loss = 0
-            lengthscales = []
-            
-            # Train each model individually
-            for t in range(n_time):
-                optimizers[t].zero_grad()
-                
-                if self.mll == 'ExactMarginalLogLikelihood':
-                    mll = gpytorch.mlls.ExactMarginalLogLikelihood(likelihoods[t], models[t])
-                elif self.mll == 'LeaveOneOutPseudoLikelihood':
-                    mll = gpytorch.mlls.LeaveOneOutPseudoLikelihood(likelihoods[t], models[t]).to(device=self.device, dtype=self.dtype)    
-                else:
-                    print(f'Unknown MLL {self.mll}, defaulting to ExactMarginalLogLikelihood')
-                    
-                output = models[t](self.x_train)
-                loss_t = -mll(output, self.y_train[:, t])
-                
-                # Add temporal smoothness penalty
-                if t > 0:
-                    pred_t = output.mean
-                    pred_prev = models[t-1](self.x_train).mean
-                    temporal_penalty = 0.01 * torch.mean((pred_t - pred_prev)**2)
-                    loss_t += temporal_penalty
-                
-                loss_t.backward()
-                optimizers[t].step()
-                
-                if self.dont_update_lengthscale and i < self.dont_update_lengthscale_iters:
-                    self._set_lengthscale_for_model(models[t], self.lengthscale)
-
-
-                total_loss += loss_t.item()
-                lengthscales.append(self._get_lengthscale_from_model(models[t]))
-            
-            # Share lengthscale information across models
-            if i % 10 == 0 and i > 0:  # Every 10 iterations
-                avg_lengthscale = np.mean(lengthscales)
-                for t in range(n_time):
-                    self._set_lengthscale_for_model(models[t], avg_lengthscale)
-            
-            if self.verbose >= 2:
-                avg_ls = np.mean(lengthscales)
-                print(f'Joint iter {i+1}/{self.training_iter} - '
-                    f'avg_lengthscale: {avg_ls:.6f} - '
-                    f'Total Loss: {total_loss:.6f}')
-
-            # Store metrics
-            self.training_metrics.lengthscale[i] = np.mean(lengthscales) if self.num_kernels == 1 else self._get_lengthscale()[0]
-            self.training_metrics.loss[i] = total_loss
-            if self.likelihood_model == 'FixedNoiseGaussianLikelihood':
-                self.training_metrics.noise[i] = self.likelihood.noise.mean()
-
-        self.models = models
-        self.likelihoods = likelihoods
 
     def _get_lengthscale_from_model(self, model):
         """Get lengthscale from a specific model."""
@@ -714,10 +634,6 @@ class GPDenoiser:
         """
         Train the Gaussian Process model to optimize hyperparameters.
         """
-        
-        if self.joint_temporal_optimization:
-            self.train_joint_temporal()
-            return
         
         # Ensure y_train is 2D (time-series data handling)
         if self.y_train.dim() == 1:
@@ -802,7 +718,7 @@ class GPDenoiser:
         Make predictions using the trained Gaussian Process model.
 
         Returns:
-            tuple: Predicted mean values, errors, and noise estimates.
+            tuple: Predicted mean values, errors (1 x sigma), and noise estimates.
         """
         
         # the code is designed to accept time-series (2D) data
@@ -813,7 +729,7 @@ class GPDenoiser:
         with gpytorch.settings.fast_pred_var(), gpytorch.settings.fast_computations(covar_root_decomposition=False, log_prob=False, solves=False):
             for t in range(self.y_train.shape[1]):
                 
-                # extract the mode for a given time instance
+                # extract the model for a given time instance
                 self.model = self.models[t]
                 self.likelihood = self.likelihoods[t]
                 
@@ -1204,7 +1120,8 @@ class GPDenoiser:
 
         if self.refine_noise_model == 'sharp':
             # fix noise likelihood allows us to pass a noise estimate and then refine it
-            self.likelihood_model = 'FixedNoiseGaussianLikelihood'  # FixedNoiseGaussianLikelihood
+            if self.likelihood_model == 'GaussianLikelihood':
+                self.likelihood_model = 'FixedNoiseGaussianLikelihood'  # FixedNoiseGaussianLikelihood
             self.learn_additional_noise = True
         elif self.refine_noise_model == 'smooth':
             # Set specific params for the noise estimation
@@ -1313,23 +1230,25 @@ class GPDenoiser:
 
         if std_prediction is not None:
             plt.fill_between(X.ravel(),
-                            np.mean(mean_prediction - std_prediction, axis=1),
-                            np.mean(mean_prediction + std_prediction, axis=1),
+                            np.mean(mean_prediction - 2*std_prediction, axis=1),
+                            np.mean(mean_prediction + 2*std_prediction, axis=1),
                             color="tab:orange", alpha=0.3, label=r"95% confidence interval")
         if y_ref is not None:
             labels = [None] * y_train.shape[1]
             labels[0] = "Reference data"
             plt.plot(X, y_ref, label=labels, color="tab:green")
+       
         labels = [None] * y_train.shape[1]
         labels[0] = "Denoised signal"
         plt.plot(X, mean_prediction, label=labels, color="tab:orange")
         plt.legend()
         plt.tight_layout() 
+        
         if (X<0).sum() > 0:
-            plt.xlabel('Wavenumber (kspace)')
+            plt.xlabel(r'Wavenumber k (\\AA$^{-1}$)')
         else:
-            plt.xlabel("Energy")
-        plt.ylabel("Absorption")
+            plt.xlabel("Energy, (eV)")
+        plt.ylabel("Absorption, \\mu(E)")
         
         plt.show()
 
@@ -1388,19 +1307,52 @@ if TORCH_AVAILABLE:
             covar_x = self.covar_module(x)
             return gpytorch.distributions.MultivariateNormal(mean_x, covar_x) 
         
-    class LargeFeatureExtractor(torch.nn.Sequential):
+    # class LargeFeatureExtractor(torch.nn.Sequential):
+    #     def __init__(self, data_dim):
+    #         super(LargeFeatureExtractor, self).__init__()
+    #         self.add_module('linear1', torch.nn.Linear(1, 1000))
+    #         self.add_module('relu1', torch.nn.ReLU())
+    #         self.add_module('linear2', torch.nn.Linear(1000, 500))
+    #         self.add_module('relu2', torch.nn.ReLU())
+    #         self.add_module('linear3', torch.nn.Linear(500, 50))
+    #         self.add_module('relu3', torch.nn.ReLU())
+    #         self.add_module('linear4', torch.nn.Linear(50, data_dim))
+
+    class LargeFeatureExtractor(torch.nn.Module):
         def __init__(self, data_dim):
-            super(LargeFeatureExtractor, self).__init__()
-            self.add_module('linear1', torch.nn.Linear(1, 1000))
-            self.add_module('relu1', torch.nn.ReLU())
-            self.add_module('linear2', torch.nn.Linear(1000, 500))
-            self.add_module('relu2', torch.nn.ReLU())
-            self.add_module('linear3', torch.nn.Linear(500, 50))
-            self.add_module('relu3', torch.nn.ReLU())
-            self.add_module('linear4', torch.nn.Linear(50, data_dim))
-
-
+            super().__init__()
+            dims = 8
+            self.branch1 = torch.nn.Sequential(
+                torch.nn.Linear(1, dims),
+                torch.nn.ReLU(),
+                torch.nn.Linear(dims, dims)
+            )
+            self.branch2 = torch.nn.Sequential(
+                torch.nn.Linear(1, dims),
+                torch.nn.ReLU(),
+                torch.nn.Linear(dims, dims),
+                torch.nn.ReLU(),
+                torch.nn.Linear(dims, dims)
+            )
+            self.branch3 = torch.nn.Sequential(
+                torch.nn.Linear(1, dims),
+                torch.nn.ReLU()
+            )
             
+            # Combine branches
+            self.combine = torch.nn.Sequential(
+                torch.nn.Linear(dims*3, dims*2),
+                torch.nn.ReLU(),
+                torch.nn.Linear(dims*2, data_dim)
+            )
+            
+        def forward(self, x):
+            b1 = self.branch1(x)
+            b2 = self.branch2(x)
+            b3 = self.branch3(x)
+            combined = torch.cat([b1, b2, b3], dim=-1)
+            return self.combine(combined)
+    
     class TrainingMetrics:
         """
         Container class for storing training metrics during GP optimization.

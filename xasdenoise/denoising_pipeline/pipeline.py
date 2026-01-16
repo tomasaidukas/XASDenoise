@@ -61,7 +61,7 @@ class DenoisingPipeline:
         
         # Results
         self.results = None
-    
+        
     def load_data(self, spectrum_obj, data_mask: Optional[np.ndarray] = None, 
                   noise: Optional[np.ndarray] = None, y_weights: Optional[np.ndarray] = None,
                   y_reference: Optional[np.ndarray] = None):
@@ -95,6 +95,75 @@ class DenoisingPipeline:
         
         return self
     
+    def check_inputs(self):
+        """
+        Check that inoput are in the correct format. 
+        All arrays are assumed to be 2D, representing (n_energy_points, n_time_instances).
+        Even if 1D arrays are passed (a single spectrum measurement), a dummy axis is added for time.
+        The only arrays assumed to be 1D are "energy" and "data_mask" (if provided).
+        """
+        
+        if self.original_energy is None or self.original_spectrum is None:
+            raise ValueError("Data must be loaded before processing. Call load_data() first.")
+        
+        # Ensure energy is 1D
+        if self.original_energy.ndim != 1:
+            raise ValueError("Energy array must be 1D.")
+        
+        # Ensure spectrum is 2D
+        if self.original_spectrum.ndim == 1:
+            self.original_spectrum = self.original_spectrum[:, np.newaxis]
+        elif self.original_spectrum.ndim != 2:
+            raise ValueError("Spectrum array must be 1D or 2D.")
+        
+        # Ensure data mask is 2D if provided
+        data_mask = self.processing_metadata.get('data_mask')
+        if data_mask is not None:
+            if data_mask.ndim == 2:
+                data_mask = data_mask.mean(axis=1) # Convert to 1D
+            elif data_mask.ndim != 1:
+                raise ValueError("Data mask must be 1D or 2D.")
+            self.processing_metadata['data_mask'] = data_mask.astype(bool)
+            
+            if data_mask.shape[0] != self.original_spectrum.shape[0]:
+                raise ValueError("Data mask dimensions do not match y")
+
+        # Ensure noise is 2D if provided
+        noise = self.processing_metadata.get('noise')
+        if noise is not None:
+            if noise.ndim == 1:
+                noise = noise[:, np.newaxis]
+            elif noise.ndim != 2:
+                raise ValueError("Noise array must be 1D or 2D.")
+            self.processing_metadata['noise'] = noise
+            
+            if noise.shape[0] != self.original_spectrum.shape[0]:
+                raise ValueError("Noise dimensions do not match y")
+            
+        # Ensure y_weights is 2D if provided
+        y_weights = self.processing_metadata.get('y_weights')
+        if y_weights is not None:
+            if y_weights.ndim == 1:
+                y_weights = y_weights[:, np.newaxis]
+            elif y_weights.ndim != 2:
+                raise ValueError("y_weights array must be 1D or 2D.")
+            self.processing_metadata['y_weights'] = y_weights
+            
+            if y_weights.shape[0] != self.original_spectrum.shape[0]:
+                raise ValueError("y_weights dimensions do not match y")
+            
+        # Ensure y_reference is 2D if provided
+        y_reference = self.processing_metadata.get('y_reference')
+        if y_reference is not None:
+            if y_reference.ndim == 1:
+                y_reference = y_reference[:, np.newaxis]
+            elif y_reference.ndim != 2:
+                raise ValueError("y_reference array must be 1D or 2D.")
+            self.processing_metadata['y_reference'] = y_reference
+        
+            if y_reference.shape[0] != self.original_spectrum.shape[0]:
+                raise ValueError("y_reference dimensions do not match y")
+            
     def process(self, denoiser=None, return_denoised_data=False) -> 'DenoisingPipeline':
         """
         Run the complete denoising pipeline.
@@ -112,25 +181,24 @@ class DenoisingPipeline:
         elif self.denoiser is None:
             self.denoiser = RegularDenoiser()
         
-        # Validate that data has been loaded
-        if self.spectrum_obj is None:
-            raise ValueError("Data must be loaded before processing. Call load_data() first.")
+        # Validate loaded data
+        self.check_inputs()
         
         if self.config.verbose > 0:
             print('============= Starting XAS Denoising Pipeline =============')
         
         try:
             # Step 1: Preprocessing
-            preprocessed_data = self._run_preprocessing()
+            preprocessed_data = self.run_preprocessing()
             
             # Step 2: Warping
-            warped_data = self._run_warping(preprocessed_data)
+            warped_data = self.run_warping(preprocessed_data)
             
             # Step 3: Denoising
-            denoised_data = self._run_denoising(warped_data, preprocessed_data)
+            denoised_data = self.run_denoising(warped_data, preprocessed_data)
             
             # Step 4: Post-processing
-            final_results = self._run_postprocessing(denoised_data)
+            final_results = self.run_postprocessing(denoised_data)
             
             # Store results
             self.results = final_results
@@ -144,7 +212,8 @@ class DenoisingPipeline:
             raise
         
         if return_denoised_data:
-            return denoised_data
+            warped_data['y_denoised'] = denoised_data[0]
+            return warped_data
         else:
             return self
     
@@ -164,10 +233,10 @@ class DenoisingPipeline:
 
         try:
             # Step 1: Preprocessing
-            preprocessed_data = self._run_preprocessing()
+            preprocessed_data = self.run_preprocessing()
 
             # Step 2: Warping
-            warped_data = self._run_warping(preprocessed_data)
+            warped_data = self.run_warping(preprocessed_data)
 
         except Exception as e:
             if self.config.verbose > 0:
@@ -176,7 +245,7 @@ class DenoisingPipeline:
         
         return warped_data    
             
-    def _run_preprocessing(self) -> Dict[str, Any]:
+    def run_preprocessing(self) -> Dict[str, Any]:
         """Run the preprocessing step."""
         
         return self.preprocessor.process(
@@ -189,7 +258,7 @@ class DenoisingPipeline:
             y_reference=self.processing_metadata.get('y_reference')
         )
     
-    def _run_warping(self, preprocessed_data: Dict[str, Any]) -> Dict[str, Any]:
+    def run_warping(self, preprocessed_data: Dict[str, Any]) -> Dict[str, Any]:
         """Run the warping step."""
         
         return self.warper.process(
@@ -202,7 +271,7 @@ class DenoisingPipeline:
             denoiser=self.denoiser
         )
     
-    def _run_denoising(self, warped_data: Dict[str, Any], 
+    def run_denoising(self, warped_data: Dict[str, Any], 
                       preprocessed_data: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Run the denoising step."""
         
@@ -219,7 +288,7 @@ class DenoisingPipeline:
         )
     
         
-    def _run_postprocessing(self, denoised_data: Tuple[np.ndarray, np.ndarray, np.ndarray]) -> Dict[str, np.ndarray]:
+    def run_postprocessing(self, denoised_data: Tuple[np.ndarray, np.ndarray, np.ndarray]) -> Dict[str, np.ndarray]:
         """Run the post-processing step."""
         
         y_denoised, y_error, y_noise = denoised_data
@@ -335,8 +404,8 @@ class DenoisingPipeline:
             # Add error bands if available
             if y_error is not None and np.sum(y_error) > 0:
                 plt.fill_between(x_data, y_denoised[:, 0] - y_error[:, 0]*2, 
-                               y_denoised[:, 0] + y_error[:, 0]*2,
-                               color="tab:orange", alpha=0.3, label=r"95% confidence interval")
+                                         y_denoised[:, 0] + y_error[:, 0]*2,
+                                         color="tab:orange", alpha=0.3, label=r"95% confidence interval")
         else:
             # Multiple time instances
             alpha_val = max(0.2, 0.5 / n_time_instances)
@@ -359,7 +428,7 @@ class DenoisingPipeline:
         
         plt.legend(loc='upper right')
         plt.xlabel("Energy (eV)")
-        plt.ylabel("Absorption")
+        plt.ylabel("Absorption, μ(E)")
         # plt.title("Energy Domain Comparison")
         
         # Plot 2: K-space domain (if requested)
@@ -424,8 +493,8 @@ class DenoisingPipeline:
                                    color="tab:orange", alpha=alpha_val*0.5)#, label=r"95% confidence interval")
             
             # plt.legend(loc='upper right')
-            plt.xlabel("Wavenumber (k)")
-            plt.ylabel("k²-weighted absorption")
+            plt.xlabel(r"Wavenumber k (\AA$^{-1}$)")
+            plt.ylabel(r"$k^{2}$-weighted absorption")
             # plt.title("K-space Comparison")
         
         plt.tight_layout()

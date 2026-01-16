@@ -12,7 +12,6 @@ from skimage.restoration import denoise_tv_chambolle
 from scipy.signal import savgol_filter
 import pywt
 from xasdenoise.denoising_methods.denoising_utils import downsample_data
-from sklearn.decomposition import DictionaryLearning
 import time
         
 try:
@@ -86,7 +85,7 @@ class RegularDenoiser:
                             },
         "robust_pca": {
                             "params": {"lambda_sparse": 0.1, "max_iter": 100},
-                            "params_bounds": {"lambda_sparse": [0.01, 1.0]}
+                            "params_bounds": {"lambda_sparse": [0.001, 1.0]}
                             },
         
     })
@@ -326,7 +325,8 @@ class RegularDenoiser:
         if x is None or y is None:
             raise ValueError("Missing required arguments: x or y.")
         
-        if self.verbose: print(f'Denoising using method: {self.method_name}.')
+        if self.verbose: 
+            print(f'Denoising using method: {self.method_name}.')
         
         # Adjust denoising parameters if needed
         self.adjust_params(self.method_name)
@@ -334,9 +334,10 @@ class RegularDenoiser:
         # Normalize the data
         x, y, x_predict, y_reference = self.normalize_data(x, y, x_predict, y_reference)
 
-        # The denoisers can operate on 1D or 2D arrays
+        # The denoisers can operate on 1D or 2D arrays, default assumes arrays are 2D
         dim = y.ndim
-        if dim == 1: y = y[:, np.newaxis]
+        if dim == 1: 
+            y = y[:, np.newaxis]
             
         # Use the specified denoising method
         method = getattr(self, self.method_name.lower(), None)
@@ -361,7 +362,8 @@ class RegularDenoiser:
             #     tmp[:,t] = np.interp(x_predict, x, y_denoised[:, t])
             # y_denoised = tmp
             
-        if dim == 1: y_denoised = y_denoised[:, 0]
+        if dim == 1: 
+            y_denoised = y_denoised[:, 0]
         
         y_denoised = self.denormalize_data(y_denoised)
 

@@ -277,28 +277,29 @@ def remove_glitches(data, glitch_mask0, glitch_fill='interp', exclude_edge=False
         exclude = (x > data.first_minima_before_edge) & (x < data.first_maxima_after_edge + 20)
         glitch_mask[exclude] = False
 
-    # if glitches are at the start/end of the spectrum, interpolation is not well defined, better to just crop the data
-    if crop_edges:
-        glitch_mask_tmp = np.zeros_like(glitch_mask, dtype=bool)
+    # if glitches are at the start/end of the spectrum, interpolation is not well defined,
+    # better to just keep them or crop the data
+    glitch_mask_tmp = np.zeros_like(glitch_mask, dtype=bool)
+    
+    # check if there are glitches at the start of the spectrum for around 10eV
+    idx = np.where((x - x[0]) < 10)[0]
+    if np.sum(glitch_mask[idx]) > 0:
+        glitch_mask_tmp[idx] = glitch_mask[idx]
+        glitch_mask[idx] = False
         
-        # check if there are glitches at the start of the spectrum for around 10eV
-        idx = np.where((x - x[0]) < 10)[0]
-        if np.sum(glitch_mask[idx]) > 0:
-            glitch_mask_tmp[idx] = glitch_mask[idx]
-            glitch_mask[idx] = False
-            
-        # check if there are glitches at the end of the spectrum for around 10eV
-        idx = np.where((x[-1] - x) < 10)[0]
-        if np.sum(glitch_mask[idx]) > 0:
-            glitch_mask_tmp[idx] = glitch_mask[idx]
-            glitch_mask[idx] = False
-            
+    # check if there are glitches at the end of the spectrum for around 10eV
+    idx = np.where((x[-1] - x) < 10)[0]
+    if np.sum(glitch_mask[idx]) > 0:
+        glitch_mask_tmp[idx] = glitch_mask[idx]
+        glitch_mask[idx] = False
+        
+    if crop_edges:
         # crop data by deleting energy indices
         if np.sum(glitch_mask_tmp) > 0:
             data_mask = ~glitch_mask_tmp
             data.delete_energy_indices(glitch_mask_tmp)            
             glitch_mask = data.glitch_mask
-                
+                    
     # perform glitch removal/interpolation        
     if glitch_mask is not None and np.sum(glitch_mask) > 0:     
         x0 = data.energy
@@ -398,7 +399,7 @@ def normalize_spectrum(data, reference=None, fitting_funcs=['1','V'], fit_indivi
             'fit_individual': False
         }
     
-    data.edge_step = edge_step
+    # data.edge_step = edge_step
     
 def undo_spectrum_normalization(data):
     """

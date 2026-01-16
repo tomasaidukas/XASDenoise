@@ -209,7 +209,7 @@ class DataWarper:
                 title = "Unwrapping Results: Custom Function"
             else:
                 title=f"Unwrapping Results: {self.config.get('input_warping_method')}"
-            self.visualize_warping(x_uniform, y, x_original, y_warped, title=title)
+            self.visualize_unwarping(x_uniform, y, x_original, y_warped, title=title)
         
         return x_original, y_warped, y_error_warped, noise_warped
         
@@ -235,27 +235,63 @@ class DataWarper:
             y2 (array): Second domain y-coordinates.
             title (str): Plot title.
         """
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
         
         # First plot: Original domain data
         try:
-            ax1.plot(x1, y1[:, 0], 'r-', label='Original domain data')
+            ax1.plot(x1, y1[:, 0])
         except:
-            ax1.plot(x1, y1, 'r-', label='Original domain data')
+            ax1.plot(x1, y1)
         ax1.set_title('Before Warping')
-        ax1.set_xlabel('X')
-        ax1.set_ylabel('Y')
-        ax1.legend()
+        ax1.set_xlabel('X (Original domain)')
+        # ax1.set_ylabel('Y')
+        # ax1.legend()
         
         # Second plot: Warped domain data
         try:
-            ax2.plot(x2, y2[:, 0], 'g-', label='Warped domain data')
+            ax2.plot(x2, y2[:, 0])
         except:
-            ax2.plot(x2, y2, 'g-', label='Warped domain data')
+            ax2.plot(x2, y2)
         ax2.set_title('After Warping')
-        ax2.set_xlabel('X')
-        ax2.set_ylabel('Y')   
-        ax2.legend()     
+        ax2.set_xlabel('X (Warped domain)')
+        # ax2.set_ylabel('Y')   
+        # ax2.legend()     
+        plt.suptitle(title)
+        plt.tight_layout()
+        plt.show()
+
+    def visualize_unwarping(self, x1, y1, x2, y2, title="Warping Results"):
+        """
+        Visualize warping results with dual plots.
+        
+        Args:
+            x1 (array): First domain x-coordinates.
+            y1 (array): First domain y-coordinates.
+            x2 (array): Second domain x-coordinates.
+            y2 (array): Second domain y-coordinates.
+            title (str): Plot title.
+        """
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+        
+        # First plot: Original domain data
+        try:
+            ax1.plot(x1, y1[:, 0])
+        except:
+            ax1.plot(x1, y1)
+        ax1.set_title('Before Unwarping')
+        ax1.set_xlabel('X (Warped domain)')
+        # ax1.set_ylabel('Y')
+        # ax1.legend()
+        
+        # Second plot: Warped domain data
+        try:
+            ax2.plot(x2, y2[:, 0])
+        except:
+            ax2.plot(x2, y2)
+        ax2.set_title('After Unwarping')
+        ax2.set_xlabel('X (Original domain)')
+        # ax2.set_ylabel('Y')   
+        # ax2.legend()     
         plt.suptitle(title)
         plt.tight_layout()
         plt.show()

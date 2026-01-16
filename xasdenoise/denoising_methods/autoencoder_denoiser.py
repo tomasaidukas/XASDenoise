@@ -19,40 +19,42 @@ try:
     TORCH_AVAILABLE = True
 except ImportError:
     torch = None
-    # warnings.warn("PyTorch not available - GPDenoiser will not be functional")
     
 
 
-# Make an encoder denoising class which takes a loaded encoder model and denoises the data
-class EncoderDenoiser:
+# Make an autoencoder denoising class which takes a loaded autoencoder model and denoises the data
+class AutoencoderDenoiser:
     """
-    A class to perform signal denoising using an encoder model.
+    A class to perform signal denoising using an autoencoder model.
     
     Note: Requires PyTorch. If not available, raises ImportError on initialization.
     """
     def __init__(self, model_type='conv', device='auto', gpu_index=0, num_layers=4, kernel_size=7, 
                  channels=None, dropout_rate=0, normalization_method=None, bias=False,
-                 output_mode='direct', output_nonnegativity=False):
+                 output_mode='direct', output_nonnegativity=False,
+                 transpose_input=False):
         """
-        Initialize the EncoderDenoiser with a specified autoencoder architecture.
+        Initialize the AutoencoderDenoiser with a specified autoencoder architecture.
 
         Args:
-            model_type (str): Type of autoencoder (only 'conv' is implemented). Defaults to 'conv'.
+            model_type (str): Type of autoencoder. Options: 'conv' (1D), 'conv2d_temporal' (2D), 'separable_conv1d' (separable 1D). Defaults to 'conv'.
             device (str): Device to use for training and inference. Options: 'auto', 'cpu', 'cuda', 'mps'. Defaults to 'auto'.
             gpu_index (int): GPU index to use when device is 'cuda'. Defaults to 0.
             num_layers (int): Number of layers in the autoencoder. Defaults to 4.
-            kernel_size (int): Kernel size for convolutional layers. Defaults to 7.
+            kernel_size (int): Kernel size for convolutional layers (energy dimension for 2D). Defaults to 7.
             channels (list, optional): Number of channels in each layer. Defaults to None.
             dropout_rate (float): Dropout rate for regularization. Defaults to 0.
-            normalization_method (str, optional): Normalization method to apply to the input data. Defaults to None.
+            normalization_method: None, 'zscore', 'minmax', 'l2norm'.
             bias (bool): Whether to include bias terms in layers. Defaults to False.
             output_mode (str): Output mode of the autoencoder. Options: 'direct', 'residual'. Defaults to 'direct'.
             output_nonnegativity (bool): If True and output_mode is 'direct', applies softplus to ensure non-negative outputs. Defaults to False.
+            transpose_input (str): If True, transposes the input data before processing. Defaults to False.
         """
+        
         # Check dependencies before initialization
         if not TORCH_AVAILABLE:
             raise ImportError(
-                "PyTorch is required for EncoderDenoiser but not available. "
+                "PyTorch is required for AutoencoderDenoiser but not available. "
                 "Install with: pip install torch"
             )
         
@@ -68,6 +70,7 @@ class EncoderDenoiser:
         self.bias = bias
         self.output_mode = output_mode
         self.output_nonnegativity = output_nonnegativity
+        self.transpose_input = transpose_input
         
         # Initialize device - auto-detect if 'auto' is specified
         if device == 'auto':
@@ -79,7 +82,7 @@ class EncoderDenoiser:
         self.gpu_device = self._initialize_device()
         
         if model_type == 'conv':
-            self.encoder_model = ConvDenoisingAutoencoder(num_layers=self.num_layers, 
+            self.autoencoder_model = ConvDenoisingAutoencoder(num_layers=self.num_layers, 
                                                           kernel_size=self.kernel_size, 
                                                           channels=self.channels, 
                                                           dropout_rate=self.dropout_rate,
@@ -88,9 +91,9 @@ class EncoderDenoiser:
                                                           output_nonnegativity=self.output_nonnegativity
                                                           ).to(self.device)
         else:
-            raise ValueError(f"Unknown model type: {model_type}. Only 'conv' is implemented.")
+            raise ValueError(f"Unknown model type: {model_type}. Supported: 'conv'.")
 
-        self.encoder_model.train()  # Set the model to training mode
+        self.autoencoder_model.train()  # Set the model to training mode
       
     def _get_best_device(self):
         """
@@ -224,7 +227,7 @@ class EncoderDenoiser:
             return 2 * (y - y_min) / (y_max - y_min) - 1
         
         elif method == 'percentile':
-            low, high = 1, 99  # or 5, 95 depending on your data
+            low, high = 1, 99
             if compute_norm:
                 y_low = torch.quantile(y, low / 100.0, dim=1, keepdim=True)
                 y_high = torch.quantile(y, high / 100.0, dim=1, keepdim=True)
@@ -235,6 +238,13 @@ class EncoderDenoiser:
         elif method == 'l2norm':
             if compute_norm:
                 y_norm = torch.norm(y, p=2, dim=1, keepdim=True)
+                self.norm_params['y'] = y_norm
+            y_norm = self.norm_params['y']
+            return y / (y_norm + 1e-8)  # Avoid division by zero
+        
+        elif method == 'l2norm_global':
+            if compute_norm:
+                y_norm = torch.norm(y)
                 self.norm_params['y'] = y_norm
             y_norm = self.norm_params['y']
             return y / (y_norm + 1e-8)  # Avoid division by zero
@@ -273,6 +283,9 @@ class EncoderDenoiser:
         elif method == 'l2norm':
             y_norm = self.norm_params['y']
             return y * (y_norm + 1e-8)  # Avoid division by zero
+        elif method == 'l2norm_global':
+            y_norm = self.norm_params['y']
+            return y * (y_norm + 1e-8)  # Avoid division by zero
         elif method == 'zscore':
             y_mean, y_std = self.norm_params['y']
             return y * (y_std + 1e-8) + y_mean  # Avoid division by zero
@@ -280,12 +293,11 @@ class EncoderDenoiser:
             raise ValueError(f"Unknown normalization method: {method}. Supported: 'minmax', 'l2norm', 'zscore'.")
     
     def train_model(self, y_train, y_target, mask_train=None, y_val=None, y_val_target=None, mask_val=None,
-            batch_size=32, num_epochs=1000, learning_rate=1e-4, save_path=None, augment_data=False, noise2noise=False,
+            batch_size=32, num_epochs=1000, learning_rate=1e-4, save_path=None, augment_data=False,
             remove_padded_regions=True, randomized_masking=False, loss_weights=None,
-            early_stopping_patience=50, weight_decay=1e-5, temporal_smoothness_lambda=0.0,
-            static_region_mask=None, static_region_weight=1.0):
+            early_stopping_patience=50, weight_decay=1e-5, dont_shuffle=False):
         """
-        Train the encoder model using the given training data with optional masking.
+        Train the autoencoder model using the given training data with optional masking.
 
         Args:
             y_train (torch.Tensor): Noisy spectra (input for training).
@@ -299,23 +311,48 @@ class EncoderDenoiser:
             learning_rate (float): Learning rate for the optimizer. Defaults to 1e-4.
             save_path (str, optional): Path to save the trained model. Defaults to None.
             augment_data (bool): Whether to apply data augmentation. Defaults to False.
-            noise2noise (bool): Whether to use noise2noise augmentation. Defaults to False.
             remove_padded_regions (bool): Whether to remove padded regions using the mask. Defaults to True.
             randomized_masking (bool): Whether to randomly mask data during training. Defaults to False.
             loss_weights (torch.Tensor, optional): Weights for each data point in the loss function. Defaults to None.
             early_stopping_patience (int): Number of epochs to wait for improvement before stopping. Defaults to 50.
             weight_decay (float): L2 regularization strength. Defaults to 1e-5.
-            temporal_smoothness_lambda (float): Weight for temporal smoothness regularization. 
-                Encourages smooth evolution across time for time-series data. Defaults to 0.0 (disabled).
-                Recommended values: 0.01-0.1 for Noise2Noise on time-series.
-            static_region_mask (torch.Tensor, optional): Binary mask (shape: energy_points) marking spectral regions
-                that should remain constant across all time points (e.g., pre-edge background, substrate peaks).
-                1 = static region, 0 = evolving region. Defaults to None (no constraint).
-            static_region_weight (float): Weight for static region variance penalty. Higher values enforce
-                stronger temporal invariance in masked regions. Defaults to 1.0.
+            dont_shuffle (bool): Whether to NOT shuffle the data within each batch. Default is False.
         """
+        
+        # Prepare data and loaders
+        train_loader, val_loader, loss_weights_dict = self._prepare_training_data(
+            y_train, y_target, mask_train, y_val, y_val_target, mask_val,
+            batch_size, loss_weights, dont_shuffle
+        )
+        
+        # Setup optimizer and scheduler
+        optimizer, scheduler = self._setup_optimizer_and_scheduler(learning_rate, weight_decay)
+        
+        # Initialize training state
+        training_state = self._initialize_training_state(early_stopping_patience)
+        
+        # Train the model
+        metrics = self._train_model(
+            train_loader, val_loader, optimizer, scheduler, training_state,
+            num_epochs, augment_data, remove_padded_regions,
+            randomized_masking, loss_weights_dict, save_path
+        )
+        
+        # Save final models
+        self._save_final_models(save_path, training_state, metrics)
+        
+        return metrics
+    
+    def _prepare_training_data(self, y_train, y_target, mask_train, 
+                                y_val, y_val_target, mask_val, batch_size, loss_weights,
+                                dont_shuffle):
+        """Prepare and normalize training data, create data loaders."""
+        
         # Convert to tensors and initialize arrays
-        y_train, y_target, mask_train, y_val, y_val_target, mask_val = self.to_tensor(y_train), self.to_tensor(y_target), self.to_tensor(mask_train), self.to_tensor(y_val), self.to_tensor(y_val_target), self.to_tensor(mask_val)
+        y_train, y_target, mask_train, y_val, y_val_target, mask_val = \
+            self.to_tensor(y_train), self.to_tensor(y_target), self.to_tensor(mask_train), \
+            self.to_tensor(y_val), self.to_tensor(y_val_target), self.to_tensor(mask_val)
+            
         if mask_train is None:
             mask_train = torch.ones_like(y_train)
         if y_val is not None and mask_val is None:
@@ -323,13 +360,6 @@ class EncoderDenoiser:
         if loss_weights is not None:
             loss_weights = self.to_tensor(loss_weights)
             loss_weights0 = loss_weights.clone()
-        
-        # Preprocess static region mask
-        if static_region_mask is not None:
-            static_region_mask = self.to_tensor(static_region_mask)
-            # Ensure it's the right shape (should be 1D with length = num_energy_points)
-            if static_region_mask.dim() == 1:
-                static_region_mask = static_region_mask.unsqueeze(0)  # Make it (1, energy_points)
             
         # Normalize data
         if y_val is not None:
@@ -339,348 +369,304 @@ class EncoderDenoiser:
         y_train = self.normalize_data(y_train, method=self.normalization_method)
         y_target = self.normalize_data(y_target, compute_norm=False, method=self.normalization_method)
         
+        if self.transpose_input:
+            y_train = y_train.T
+            y_target = y_target.T
+            mask_train = mask_train.T
+            if y_val is not None:
+                y_val = y_val.T
+                y_val_target = y_val_target.T
+                mask_val = mask_val.T
+            if loss_weights is not None:
+                loss_weights = loss_weights.T
+                loss_weights0 = loss_weights0.T
+                
         # Prepare datasets
-        if temporal_smoothness_lambda > 0.0:
-            shuffle = False
-        else:
-            shuffle = True
-            
-        train_dataset = TensorDataset(y_train, y_target, mask_train) if mask_train is not None else TensorDataset(y_train, y_target)
+        shuffle = not dont_shuffle
+
+        train_dataset = TensorDataset(y_train, y_target, mask_train)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=shuffle)
         
+        val_loader = None
         if y_val is not None and y_val_target is not None:
             val_dataset = TensorDataset(y_val, y_val_target, mask_val) if mask_val is not None else TensorDataset(y_val, y_val_target)
             val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-        else:
-            val_loader = None
 
-        # Define loss function and optimizer                
-        criterion = nn.MSELoss(reduction='none')  # Compute per-element loss        
-        # criterion = nn.L1Loss(reduction='none') 
+        loss_weights_dict = {
+            'loss_weights': loss_weights if loss_weights is not None else None,
+            'loss_weights0': loss_weights0 if loss_weights is not None else None,
+        }
         
-        # Add weight decay
-        optimizer = optim.Adam(self.encoder_model.parameters(), lr=learning_rate, weight_decay=weight_decay)
-
-        # scheduler = StepLR(optimizer, step_size=int(0.6 * num_epochs), gamma=0.1)
+        return train_loader, val_loader, loss_weights_dict
+    
+    def _setup_optimizer_and_scheduler(self, learning_rate, weight_decay):
+        """Setup optimizer and learning rate scheduler."""
+        optimizer = optim.Adam(self.autoencoder_model.parameters(), lr=learning_rate, weight_decay=weight_decay)
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode='min', factor=0.5, patience=10
         )
-        
-        # Dictionary to store metrics
-        metrics = {
-            'loss': 0.0,
-            'running_loss': [],
-            'best_loss': float('inf'),
-            'val_loss': [],  # Add validation loss tracking
-            'epoch_losses': [],  # Add epoch loss tracking
-            'val_losses': []  # Add validation epoch losses
+        return optimizer, scheduler
+    
+    def _initialize_training_state(self, early_stopping_patience):
+        """Initialize training state variables."""
+        return {
+            'metrics': {
+                'loss': 0.0,
+                'running_loss': [],
+                'best_loss': float('inf'),
+                'val_loss': [],
+                'epoch_losses': [],
+                'val_losses': []
+            },
+            'best_val_loss': float('inf'),
+            'patience_counter': 0,
+            'best_model_state': None,
+            'early_stopping_patience': early_stopping_patience
         }
-        
-        # Early stopping variables
-        best_val_loss = float('inf')
-        patience_counter = 0
-        best_model_state = None
-        
+    
+    def _train_model(self, train_loader, val_loader, optimizer, scheduler, training_state,
+                       num_epochs, augment_data, remove_padded_regions,
+                       randomized_masking, loss_weights_dict, save_path):
+        """Standard training loop."""
+        criterion = nn.MSELoss(reduction='none')
+        metrics = training_state['metrics']
         update_freq = 5
         
-        # Training loop
         for epoch in range(num_epochs):
-            # Create progress bar for this epoch with custom formatting
-            with tqdm(
-                total=len(train_loader),
-                desc=f"Epoch {epoch+1}/{num_epochs}",
-                miniters=update_freq,  # Only update progress every N iterations
-                bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}',  # Customize bar format
-                position=0, 
-                leave=True
-            ) as pbar:
-                    
-                self.encoder_model.train()
-                epoch_loss = 0.0
-                for batch in train_loader:
-                    y_batch, y_target_batch, mask_batch = batch
-                        
-                    # The spectra here are not of uniform lengths and are instead padded with zeros.
-                    # Use the mask to crop the padded values. This avoids having zeros in the CNN layers and
-                    # random cropping of all spectra within the batch acts as a data augmentation technique.
-                    if remove_padded_regions and mask_batch is not None:
-                        nonzero = mask_batch.all(dim=0)
-                        y_batch = y_batch[:, nonzero]
-                        y_target_batch = y_target_batch[:, nonzero]
-                        mask_batch = mask_batch[:, nonzero]
-                        if loss_weights is not None:
-                            loss_weights = loss_weights0[:, nonzero]
-
-
-                    # Mask data or the loss randomly with 50-50 chance
-                    if randomized_masking and mask_batch is not None:
-                        if torch.rand(1).item() < 0.5:
-                            nonzero = mask_batch.all(dim=0)
-                            y_batch = y_batch[:, nonzero]
-                            y_target_batch = y_target_batch[:, nonzero]
-                            mask_batch = mask_batch[:, nonzero]  
-                                
-                    # Data augmentation for XAS (apply more aggressively to prevent overfitting)
-                    if augment_data and epoch < num_epochs * 0.8:  # Apply for 80% of training
-                        if noise2noise:
-                            aug_params = self._get_random_aug_params(y_batch.shape, device=y_batch.device)
-                            y_batch = self._augment_xas_data_noise2noise(y_batch, aug_params)
-                            y_target_batch = self._augment_xas_data_noise2noise(y_target_batch, aug_params)
-                        else:
-                            y_batch = self._augment_xas_data(y_batch)
-                                    
-                    # Forward pass
-                    outputs = self.encoder_model(y_batch)
-                    
-                    # Compute masked loss (reconstruction loss)
-                    loss = criterion(outputs, y_target_batch)  # Per-element loss
-                    if loss_weights is not None:
-                        loss = loss * loss_weights
-                    reconstruction_loss = (loss * mask_batch).sum() / mask_batch.sum()  # Compute mean over valid values only
-
-                    # Add temporal smoothness regularization if enabled
-                    temporal_loss = 0.0
-                    if temporal_smoothness_lambda > 0 and outputs.shape[0] > 1:  # Need at least 2 time points
-                        # Compute differences between consecutive time points (first order smoothness)
-                        temporal_diff = outputs[1:, :] - outputs[:-1, :]
-                        # L2 norm of temporal differences
-                        first_order_loss = torch.mean(temporal_diff ** 2)
-                    
-                        # endpoint loss
-                        # endpoint_error = outputs[-1, :] - outputs[-2, :]
-                        
-                        # Second-order smoothness (penalize acceleration/curvature)
-                        second_order_diff = temporal_diff[1:, :] - temporal_diff[:-1, :]
-                        second_order_loss = torch.mean(second_order_diff ** 2)
-
-                        # Combine first and second order losses
-                        temporal_loss = first_order_loss + second_order_loss
-                        # temporal_loss = first_order_loss + 0.5 * second_order_loss + torch.mean(endpoint_error ** 2)
-
-                            
-                    # Add static region constraint if enabled
-                    static_loss = 0.0
-                    if static_region_mask is not None and outputs.shape[0] > 1:
-                        # Extract the static regions from all time points
-                        static_outputs = outputs * static_region_mask  # Broadcasting: (time, energy) * (1, energy)
-                        # Compute variance across time dimension for static regions
-                        # Ideally, variance should be zero (no temporal evolution)
-                        static_variance = torch.var(static_outputs, dim=0, unbiased=False)  # Shape: (energy,)
-                        # Only penalize variance where mask is active (non-zero)
-                        static_loss = torch.sum(static_variance * static_region_mask.squeeze()) / (static_region_mask.sum() + 1e-8)
-                        
-                    # Total loss with regularization
-                    loss = reconstruction_loss + temporal_smoothness_lambda * temporal_loss + static_region_weight * static_loss
-
-                    # Backward pass and optimization
-                    optimizer.zero_grad()
-                    loss.backward()
-                    
-                    # Gradient clipping to prevent exploding gradients
-                    torch.nn.utils.clip_grad_norm_(self.encoder_model.parameters(), max_norm=1.0)
-                    
-                    optimizer.step()
-                    
-                    # Update metrics
-                    batch_loss = loss.item()
-                    epoch_loss += batch_loss
-                    metrics['loss'] = batch_loss
-                    metrics['running_loss'].append(batch_loss)
-                    
-                    # Compute running average over last 20 batches
-                    running_avg = np.mean(metrics['running_loss'][-20:])
-                    
-                    # Update progress bar with current metrics
-                    postfix_dict = {
-                        'loss': f"{batch_loss:.8f}",
-                        'avg_loss': f"{running_avg:.8f}",
-                        'best': f"{metrics['best_loss']:.8f}"
-                    }
-                    
-                    # Add validation loss to progress bar if available
-                    if len(metrics['val_losses']) > 0:
-                        postfix_dict['val_loss'] = f"{metrics['val_losses'][-1]:.8f}"
-                    
-                    pbar.set_postfix(postfix_dict)
-                    pbar.update()
-                
-                # Validation loop
-                val_loss = None
-                if val_loader is not None:
-                    self.encoder_model.eval()
-                    val_loss = 0.0
-                    with torch.no_grad():
-                        for batch in val_loader:
-                            y_batch, y_target_batch, mask_batch = batch
-                            
-                            nonzero = mask_batch.all(dim=0)
-                            y_batch = y_batch[:, nonzero]
-                            y_target_batch = y_target_batch[:, nonzero]
-                            mask_batch = mask_batch[:, nonzero]
-                            if loss_weights is not None:
-                                loss_weights = loss_weights0[:, nonzero]
-                                
-                            outputs = self.encoder_model(y_batch)
-                            
-                            # Compute masked loss (reconstruction loss)
-                            loss = criterion(outputs, y_target_batch)  # Per-element loss
-                            if loss_weights is not None:
-                                loss = loss * loss_weights
-                            reconstruction_loss = (loss * mask_batch).sum() / mask_batch.sum()  # Compute mean over valid values only
-
-                            # Add temporal smoothness regularization if enabled
-                            temporal_loss = 0.0
-                            if temporal_smoothness_lambda > 0 and outputs.shape[0] > 1:
-                                temporal_diff = outputs[1:, :] - outputs[:-1, :]
-                                temporal_loss = torch.mean(temporal_diff ** 2)
-                            
-                            # Add static region constraint if enabled
-                            static_loss = 0.0
-                            if static_region_mask is not None and outputs.shape[0] > 1:
-                                static_outputs = outputs * static_region_mask
-                                static_variance = torch.var(static_outputs, dim=0, unbiased=False)
-                                static_loss = torch.sum(static_variance * static_region_mask.squeeze()) / (static_region_mask.sum() + 1e-8)
-                            
-                            # Total loss
-                            loss = reconstruction_loss + temporal_smoothness_lambda * temporal_loss + static_region_weight * static_loss
-
-                            val_loss += loss.item()
-                    val_loss /= len(val_loader)                
-                    metrics['val_losses'].append(val_loss)  # Store validation loss
-
-                # End of epoch processing
-                avg_epoch_loss = epoch_loss / len(train_loader)
-                metrics['epoch_losses'].append(avg_epoch_loss)  # Store epoch loss
-                
-                if avg_epoch_loss < metrics['best_loss']:
-                    metrics['best_loss'] = avg_epoch_loss
-                    best_model_state = self.encoder_model.state_dict().copy()
-                    
-                # Early stopping logic
-                if val_loss is not None:
-                    if val_loss < best_val_loss:
-                        best_val_loss = val_loss
-                        patience_counter = 0
-                        # Save best model state
-                        if self.verbose:
-                            print(f"\nNew best validation loss: {val_loss:.8f}")
-                    else:
-                        patience_counter += 1
-                        if self.verbose and patience_counter % 10 == 0:
-                            print(f"\nNo improvement for {patience_counter} epochs")
-                    
-                    # Early stopping check
-                    if patience_counter >= early_stopping_patience:
-                        print(f"\nEarly stopping at epoch {epoch+1}! No improvement for {early_stopping_patience} epochs.")
-                        print(f"Best validation loss: {best_val_loss:.8f}")
-                        # Restore best model
-                        break
-                
-                # Final update for this epoch with validation loss
-                postfix_dict = {
-                    'epoch_loss': f"{avg_epoch_loss:.8f}", 
-                    'best_loss': f"{metrics['best_loss']:.8f}"
-                }
-                
-                if val_loss is not None:
-                    postfix_dict['val_loss'] = f"{val_loss:.8f}"
-                    postfix_dict['patience'] = f"{patience_counter}"
-                
-                pbar.set_postfix(postfix_dict)
-                
-            # Save the trained model
-            if save_path is not None and (epoch+1) % 50 == 0:
-                temp_path = save_path.replace('.pth', f'_checkpoint.pth')
-                torch.save(self.encoder_model.state_dict(), temp_path)
-                print(f"Model saved to {temp_path}")
+            epoch_loss = self._run_training_epoch(
+                train_loader, optimizer, criterion, metrics, epoch, num_epochs,
+                augment_data, remove_padded_regions, randomized_masking,
+                loss_weights_dict, update_freq
+            )
             
-            scheduler.step(avg_epoch_loss)
-    
-        # Save the trained model
-        if save_path is not None:
-            torch.save(self.encoder_model.state_dict(), save_path)
-            print(f"Final model saved to {save_path}")
+            # Validation
+            val_loss = self._validate_epoch(val_loader, criterion, loss_weights_dict)
+            if val_loss is not None:
+                metrics['val_losses'].append(val_loss)
             
-            # Save the best model if we have it
-            if best_model_state is not None:
-                torch.save(best_model_state, save_path.replace('.pth', '_best.pth'))
-                print(f"Best model saved to {save_path.replace('.pth', '_best.pth')} (val_loss: {best_val_loss:.8f})")
-
-            # Also save the training metrics
-            metrics_path = save_path.replace('.pth', '_training_metrics.pkl')
-            with open(metrics_path, 'wb') as f:
-                pickle.dump(metrics, f)
-            print(f"Training metrics saved to {metrics_path}")
-
+            # Update training state
+            self._update_training_state(training_state, epoch_loss, val_loss, epoch, num_epochs)
+            
+            # Checkpoint saving
+            if save_path and (epoch + 1) % 50 == 0:
+                self._save_checkpoint(save_path)
+            
+            # Early stopping check
+            if self._check_early_stopping(training_state, epoch):
+                break
+            
+            scheduler.step(epoch_loss)
+        
         return metrics
     
-    def _augment_xas_data(self, y_batch):
-        """XAS-specific data augmentation."""
-        augmented = y_batch.clone()
+    def _run_training_epoch(self, train_loader, optimizer, criterion, metrics,
+                                     epoch, num_epochs, augment_data,
+                                     remove_padded_regions, randomized_masking,
+                                     loss_weights_dict, update_freq):
+        """Run one training epoch of training."""
+        self.autoencoder_model.train()
+        epoch_loss = 0.0
+        
+        with tqdm(total=len(train_loader), desc=f"Epoch {epoch+1}/{num_epochs}",
+                 miniters=update_freq, bar_format='{l_bar}{bar:20}{r_bar}{bar:-20b}',
+                 position=0, leave=True) as pbar:
+            
+            for batch in train_loader:
+                y_batch, y_target_batch, mask_batch = batch
                 
-        # Random noise
-        noise_level = 0.01 * torch.rand(y_batch.shape[0], 1, device=y_batch.device)
-        noise = torch.randn_like(y_batch) * noise_level
-        augmented = augmented + noise
+                # Apply preprocessing
+                y_batch, y_target_batch, mask_batch = self._preprocess_batch(
+                    y_batch, y_target_batch, mask_batch, remove_padded_regions,
+                    randomized_masking, loss_weights_dict
+                )
+                
+                # Apply augmentation
+                if augment_data and epoch < num_epochs * 0.8:
+                    y_batch, y_target_batch = self._apply_data_augmentation(
+                        y_batch, y_target_batch
+                    )
+                
+                # Forward pass
+                outputs = self.autoencoder_model(y_batch)
+                
+                # Compute loss
+                loss = criterion(outputs, y_target_batch)
+                
+                if loss_weights_dict['loss_weights'] is not None:
+                    loss = loss * loss_weights_dict['loss_weights']
+                
+                reconstruction_loss = (loss * mask_batch).sum() / mask_batch.sum()
+                
+                # Backward pass
+                optimizer.zero_grad()
+                reconstruction_loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.autoencoder_model.parameters(), max_norm=1.0)
+                optimizer.step()
+                
+                # Update metrics
+                batch_loss = reconstruction_loss.item()
+                epoch_loss += batch_loss
+                self._update_progress_bar(pbar, batch_loss, metrics)
         
-        # Random baseline shift
-        baseline_shift = 0.02 * (torch.rand(y_batch.shape[0], 1, device=y_batch.device) - 0.5)
-        augmented = augmented + baseline_shift
+        return epoch_loss / len(train_loader)
+    
+    def _preprocess_batch(self, y_batch, y_target_batch, mask_batch,
+                         remove_padded_regions, randomized_masking, loss_weights_dict):
+        """Preprocess batch: remove padding, apply random masking."""
+        if remove_padded_regions and mask_batch is not None:
+            nonzero = mask_batch.all(dim=0)
+            y_batch = y_batch[:, nonzero]
+            y_target_batch = y_target_batch[:, nonzero]
+            mask_batch = mask_batch[:, nonzero]
         
-        # Random scaling (intensity variations)
-        scale = 1.0 + 0.05 * (torch.rand(y_batch.shape[0], 1, device=y_batch.device) - 0.5)
-        augmented = augmented * scale
+        if randomized_masking and mask_batch is not None:
+            if torch.rand(1).item() < 0.5:
+                nonzero = mask_batch.all(dim=0)
+                y_batch = y_batch[:, nonzero]
+                y_target_batch = y_target_batch[:, nonzero]
+                mask_batch = mask_batch[:, nonzero]
         
-        return augmented
+        return y_batch, y_target_batch, mask_batch
+    
+    def _apply_data_augmentation(self, y_batch, y_target_batch):
+        """Apply data augmentation to batch."""
+        # no augmentation for now, placeholder for future methods
+        return y_batch, y_target_batch
+    
+    def _validate_epoch(self, val_loader, criterion, loss_weights_dict):
+        """Run validation and return validation loss."""
+        if val_loader is None:
+            return None
+        
+        self.autoencoder_model.eval()
+        val_loss = 0.0
+        
+        with torch.no_grad():
+            for batch in val_loader:
+                y_batch, y_target_batch, mask_batch = batch
+                
+                nonzero = mask_batch.all(dim=0)
+                y_batch = y_batch[:, nonzero]
+                y_target_batch = y_target_batch[:, nonzero]
+                mask_batch = mask_batch[:, nonzero]
+                
+                outputs = self.autoencoder_model(y_batch)
+                
+                # Reconstruction loss
+                loss = criterion(outputs, y_target_batch)
+                if loss_weights_dict['loss_weights'] is not None:
+                    loss = loss * loss_weights_dict['loss_weights']
+                reconstruction_loss = (loss * mask_batch).sum() / mask_batch.sum()
+                
+                val_loss += reconstruction_loss.item()
+        
+        return val_loss / len(val_loader)
+    
+    def _update_progress_bar(self, pbar, batch_loss, metrics):
+        """Update progress bar with current metrics."""
+        metrics['loss'] = batch_loss
+        metrics['running_loss'].append(batch_loss)
+        
+        running_avg = np.mean(metrics['running_loss'][-20:])
+        
+        postfix_dict = {
+            'loss': f"{batch_loss:.8f}",
+            'avg_loss': f"{running_avg:.8f}",
+            'best': f"{metrics['best_loss']:.8f}"
+        }
+        
+        if len(metrics['val_losses']) > 0:
+            postfix_dict['val_loss'] = f"{metrics['val_losses'][-1]:.8f}"
+        
+        pbar.set_postfix(postfix_dict)
+        pbar.update()
+    
+    def _update_training_state(self, training_state, epoch_loss, val_loss, epoch, num_epochs):
+        """Update training state after epoch."""
+        metrics = training_state['metrics']
+        metrics['epoch_losses'].append(epoch_loss)
+        
+        if epoch_loss < metrics['best_loss']:
+            metrics['best_loss'] = epoch_loss
+            training_state['best_model_state'] = self.autoencoder_model.state_dict().copy()
+        
+        if val_loss is not None:
+            if val_loss < training_state['best_val_loss']:
+                training_state['best_val_loss'] = val_loss
+                training_state['patience_counter'] = 0
+                if self.verbose:
+                    print(f"\nNew best validation loss: {val_loss:.8f}")
+            else:
+                training_state['patience_counter'] += 1
+                if self.verbose and training_state['patience_counter'] % 10 == 0:
+                    print(f"\nNo improvement for {training_state['patience_counter']} epochs")
+    
+    def _check_early_stopping(self, training_state, epoch):
+        """Check if early stopping criteria is met."""
+        if training_state['patience_counter'] >= training_state['early_stopping_patience']:
+            print(f"\nEarly stopping at epoch {epoch+1}! No improvement for {training_state['early_stopping_patience']} epochs.")
+            print(f"Best validation loss: {training_state['best_val_loss']:.8f}")
+            return True
+        return False
+    
+    def _save_checkpoint(self, save_path):
+        """Save training checkpoint."""
+        temp_path = save_path.replace('.pth', '_checkpoint.pth')
+        torch.save(self.autoencoder_model.state_dict(), temp_path)
+        print(f"Model saved to {temp_path}")
+    
+    def _save_final_models(self, save_path, training_state, metrics):
+        """Save final and best models."""
+        if save_path is None:
+            return
+        
+        # Save final model
+        torch.save(self.autoencoder_model.state_dict(), save_path)
+        print(f"Final model saved to {save_path}")
+        
+        # Save best model
+        if training_state['best_model_state'] is not None:
+            best_path = save_path.replace('.pth', '_best.pth')
+            torch.save(training_state['best_model_state'], best_path)
+            print(f"Best model saved to {best_path} (val_loss: {training_state['best_val_loss']:.8f})")
+        
+        # Save training metrics
+        metrics_path = save_path.replace('.pth', '_training_metrics.pkl')
+        with open(metrics_path, 'wb') as f:
+            pickle.dump(metrics, f)
+        print(f"Training metrics saved to {metrics_path}")
     
     def _get_edge_crop(self, num_layers, kernel_size):
         rf = 1 + (kernel_size - 1) * num_layers
         crop = (rf - 1) // 2
         return crop
 
-    def _get_random_aug_params(self, batch_shape, device=None):
-        """Return random parameters for batch augmentation (scaling, baseline shift, crop)."""
-        B, L = batch_shape
-        device = device or 'cpu'
-        # Scaling factor: e.g., [0.95, 1.05]
-        scale = 0.95 + 0.1 * torch.rand(B, 1, device=device)
-        # Baseline shift: e.g., [-0.02, 0.02]
-        baseline = 0.04 * (torch.rand(B, 1, device=device) - 0.5)
-        # Random crop: pick a start index so that crop fits in length L
-        crop_size = int(0.9 * L)  # e.g., keep 90% of the spectrum
-        crop_starts = torch.randint(0, L - crop_size + 1, (B,), device=device)
-        return dict(scale=scale, baseline=baseline, crop_starts=crop_starts, crop_size=crop_size)
-
-    def _augment_xas_data_noise2noise(self, batch, aug_params):
-        """Apply identical augmentation (scaling, baseline, crop) to batch."""
-        out = batch * aug_params['scale'] + aug_params['baseline']
-        # Apply random crop
-        crop_starts = aug_params['crop_starts']
-        crop_size = aug_params['crop_size']
-        out = out[:, crop_starts[:, None]:(crop_starts[:, None] + crop_size)]
-        return out
-
     def save_model(self, path):
         """
-        Save the encoder model to a file.
+        Save the autoencoder model to a file.
 
         Args:
             path (str): Path to save the model file.
         """
-        torch.save(self.encoder_model.state_dict(), path)
+        torch.save(self.autoencoder_model.state_dict(), path)
         print(f"Model saved to {path}")
         
     def load_model(self, path):
         """
-        Load the encoder model from a saved file.
+        Load the autoencoder model from a saved file.
 
         Args:
             path (str): Path to the saved model file.
         """
         obj = torch.load(path, map_location=self.device)
-        self.encoder_model.load_state_dict(obj)
-        self.encoder_model.to(self.device)
-        self.encoder_model.eval()
+        
+        new_state_dict = {}
+        for key, value in obj.items():
+            new_state_dict[key] = value
+        
+        self.autoencoder_model.load_state_dict(new_state_dict)
+        self.autoencoder_model.to(self.device)
+        self.autoencoder_model.eval()
         print(f"Model loaded from {path}")
         
     def initialize_denoiser(self, **kwargs):
@@ -740,7 +726,7 @@ class EncoderDenoiser:
         
     def denoise(self):
         """
-        Perform denoising using the encoder model and optionally interpolate onto a new grid.
+        Perform denoising using the autoencoder model and optionally interpolate onto a new grid.
 
         Returns:
             tuple: Denoised signal, error estimates, and noise estimates.
@@ -755,14 +741,18 @@ class EncoderDenoiser:
         # swap x and time axes
         y = y.transpose(0, 1)
         
-        self.encoder_model.to(self.device)
+        self.autoencoder_model.to(self.device)
         
-        # Perform inference using the encoder model
-        self.encoder_model.eval()
+        # Perform inference using the autoencoder model
+        self.autoencoder_model.eval()
         with torch.no_grad():
-            # y_denoised = self.encoder_model(x, y)  
-            y = self.normalize_data(y, method=self.normalization_method)          
-            y_denoised = self.encoder_model(y)
+            # y_denoised = self.autoencoder_model(x, y)  
+            y = self.normalize_data(y, method=self.normalization_method)     
+            
+            if self.transpose_input:     
+                y_denoised = self.autoencoder_model(y.T).T
+            else:
+                y_denoised = self.autoencoder_model(y)
             y_denoised = self.denormalize_data(y_denoised, method=self.normalization_method)        
             
             # swap back to time and x axes
@@ -812,19 +802,19 @@ if TORCH_AVAILABLE:
             self.output_nonnegativity = output_nonnegativity
             
             # Encoder with dropout
-            encoder_layers = []
+            autoencoder_layers = []
             in_c = 1
             for i, out_c in enumerate(channels):
-                encoder_layers.append(
+                autoencoder_layers.append(
                     nn.Conv1d(in_c, out_c, kernel_size=kernel_size, padding=kernel_size // 2, bias=self.bias, padding_mode='reflect')
                 )
-                # encoder_layers.append(nn.InstanceNorm1d(out_c, affine=True))
-                encoder_layers.append(nn.ReLU())
+                # autoencoder_layers.append(nn.InstanceNorm1d(out_c, affine=True))
+                autoencoder_layers.append(nn.ReLU())
 
                 if i < len(channels) - 1 and dropout_rate > 0:
-                    encoder_layers.append(nn.Dropout1d(dropout_rate))
+                    autoencoder_layers.append(nn.Dropout1d(dropout_rate))
                 in_c = out_c
-            self.encoder = nn.Sequential(*encoder_layers)
+            self.encoder = nn.Sequential(*autoencoder_layers)
 
             # Decoder with dropout
             decoder_layers = []
@@ -862,7 +852,7 @@ if TORCH_AVAILABLE:
 
             # Residual learning: predict noise, subtract from input
             if self.output_mode == 'residual':
-                out = x - decoded # Predict noise
+                out = x - 1 * decoded # Predict noise
                 return out.squeeze(1)
             elif self.output_mode == 'direct':
                 if self.output_nonnegativity:
