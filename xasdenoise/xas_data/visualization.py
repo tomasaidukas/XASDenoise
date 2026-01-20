@@ -427,7 +427,7 @@ def plot_spectrum_time_instances(
     title: str = '',
     displace_vertically: bool = True,
     time_instance_number: int = 10,
-    vertical_displacement_offset: Optional[float] = None,
+    vertical_displacement_offset: Optional[float] = 0.0,
     time_binning_size: Optional[int] = None,
     crop_min: Optional[int] = None,
     crop_max: Optional[int] = None,
@@ -441,7 +441,7 @@ def plot_spectrum_time_instances(
         data (Spectrum): The spectrum data.
         title (str): Title of the plot. Defaults to ''.
         time_instance_number (int): Number of time instances to plot. Defaults to 10.
-        vertical_displacement_offset (Optional[float]): Offset for vertical displacement. Defaults to None.
+        vertical_displacement_offset (Optional[float]): Offset for vertical displacement. Defaults to 0.
         time_binning_size (Optional[int]): Size of the time binning. Defaults to None.
         crop_min (Optional[int]): Minimum crop around the edge. Defaults to None.
         crop_max (Optional[int]): Maximum crop around the edge. Defaults to None.
@@ -451,9 +451,6 @@ def plot_spectrum_time_instances(
     label = getattr(data, 'compound', '__nolegend__')
     crop = get_crop(data.energy, data.edge, crop_min or 0, crop_max or 0) if crop_min or crop_max else None
 
-    if vertical_displacement_offset is None:
-        vertical_displacement_offset = data.spectrum[:, 0].mean()
-
     if time_instance_number is not None:
         if time_instance_number > data.spectrum.shape[1]:
             time_instance_number = data.spectrum.shape[1]
@@ -462,7 +459,10 @@ def plot_spectrum_time_instances(
     else: 
         time_indices = None
         labels = None  
-        
+
+    if vertical_displacement_offset is None:
+        vertical_displacement_offset = data.spectrum[:, 0].mean()
+
     if time_binning_size is not None:
         data = data.copy()
         data.bin_time_instances(time_binning_size)

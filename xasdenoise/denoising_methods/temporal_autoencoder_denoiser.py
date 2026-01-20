@@ -650,6 +650,12 @@ class TemporalAutoencoderDenoiser:
         if static_region_mask is None or outputs.shape[0] <= 1:
             return 0.0
         
+        # Convert to tensor if needed and ensure it's on the same device as outputs
+        if not isinstance(static_region_mask, torch.Tensor):
+            static_region_mask = torch.tensor(static_region_mask, dtype=torch.float32, device=outputs.device)
+        else:
+            static_region_mask = static_region_mask.to(outputs.device)
+        
         static_outputs = outputs * static_region_mask
         static_variance = torch.var(static_outputs, dim=0, unbiased=False)
         return torch.sum(static_variance * static_region_mask.squeeze()) / (static_region_mask.sum() + 1e-8)
