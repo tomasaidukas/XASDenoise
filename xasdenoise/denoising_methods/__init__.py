@@ -4,7 +4,6 @@
 from .denoisers import (
     RegularDenoiser,
     AutoencoderDenoiser,
-    TemporalAutoencoderDenoiser,
     GPDenoiser,
 )
 
@@ -14,5 +13,4 @@ __all__ = [
     'RegularDenoiser',
     'AutoencoderDenoiser', 
     'GPDenoiser',
-    'TemporalAutoencoderDenoiser'
 ]

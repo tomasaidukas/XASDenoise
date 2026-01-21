@@ -4,7 +4,7 @@ Prepare training data for the autoencoder model.
 
 import numpy as np
 from xasdenoise.denoising_pipeline import PipelineConfig, DenoisingPipeline
-from xasdenoise.denoising_methods.denoisers import AutoencoderDenoiser, TemporalAutoencoderDenoiser
+from xasdenoise.denoising_methods.denoisers import AutoencoderDenoiser
 from sklearn.model_selection import train_test_split
 import tqdm
 
@@ -507,88 +507,6 @@ def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=Non
 
     return denoiser, training_metrics
 
-
-def train_temporal_autoencoder_model(spectrum_time_series, config=None, denoiser_preproc=None, method='noise2noise',
-                        pairing_strategy='adjacent', pair_window_size=1,
-                        model_params=None, training_params=None):
-    """
-    Prepare training data and train the autoencoder model.
-    
-    Args:
-        spectrum_time_series (Spectrum): A Spectrum object containing the time series data as a 2D array (spectrum_time_series.spectrum.shape = (energy_points, time_steps)).
-        config (PipelineConfig): Pipeline configuration object for data processing.
-        denoiser_preproc (Denoiser): Denoiser object for denoising the data during preprocessing.
-        method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
-        pairing_strategy (str): Pairing strategy for noise2noise ('adjacent', 'window', 'all_pairs').
-        pair_window_size (int): Window size within which the data are paired.
-        model_path (str): Path to save the trained model.
-        training_params (dict): Dictionary of training parameters.
-        
-    Returns:
-        EncoderModel: Trained autoencoder model.
-    """
-    if config is None:
-        # Create a default pipeline configuration
-        config = PipelineConfig(
-            verbose=0,
-        )
-        
-    processed_data = prepare_training_data(spectrum_time_series, config, denoiser_preproc, method=method,
-                                           pairing_strategy=pairing_strategy, pair_window_size=pair_window_size)
-
-    # Parameter which determines if data should be shuffled
-    if pairing_strategy == 'window':
-        dont_shuffle = True
-    else:
-        dont_shuffle = False
-        
-        # Model initialization parameters with defaults
-    model_params = {
-        'model_type': model_params.get('model_type', 'conv'),
-        'device': model_params.get('device', 'auto'),
-        'gpu_index': model_params.get('gpu_index', None),
-        'num_layers': model_params.get('num_layers', 4),
-        'kernel_size': model_params.get('kernel_size', 11),
-        'time_kernel_size': model_params.get('time_kernel_size', 11),
-        'dropout_rate': model_params.get('dropout_rate', 0),
-        'channels': model_params.get('channels', None),
-        'normalization_method': model_params.get('normalization_method', None),
-        'bias': model_params.get('bias', False),
-        'output_mode': model_params.get('output_mode', 'direct'),
-        'output_nonnegativity': model_params.get('output_nonnegativity', False),
-        'transpose_input': model_params.get('transpose_input', False)
-    }
-    
-    # Training parameters with defaults
-    training_params = {
-        'batch_size': training_params.get('batch_size', 16),
-        'num_epochs': training_params.get('num_epochs', 100),
-        'learning_rate': training_params.get('learning_rate', 1e-4),
-        'augment_data': training_params.get('augment_data', False),
-        'remove_padded_regions': training_params.get('remove_padded_regions', False),
-        'save_path': training_params.get('save_path', None),
-        'early_stopping_patience': training_params.get('early_stopping_patience', 50),
-        'weight_decay': training_params.get('weight_decay', 1e-5),
-        'loss_weights': training_params.get('loss_weights', None),
-        'temporal_smoothness_lambda': training_params.get('temporal_smoothness_lambda', 0.0),
-        'static_region_mask': training_params.get('static_region_mask', None),
-        'static_region_weight': training_params.get('static_region_weight', 1.0),
-        'dont_shuffle': training_params.get('dont_shuffle', dont_shuffle)
-    }
-
-    # Define model type and initialize the denoiser
-    denoiser = TemporalAutoencoderDenoiser(**model_params)
-
-    # Train the model
-    training_metrics = denoiser.train_model(
-        y_train=processed_data['y_train'],  # Noisy spectra as input
-        y_target=processed_data['y_target'],  # Clean spectra as target
-        mask_train=processed_data['data_mask'],  # Data mask
-        y_pair_indices=processed_data.get('y_pair_indices', None),  # Pair indices
-        **training_params
-    )
-
-    return denoiser, training_metrics
 
 def split_by_compounds(compounds, compounds_for_test=[], compounds_to_exclude=[], train_frac=0.9, val_frac=0.05, test_frac=0.05, random_state=42):
     """
