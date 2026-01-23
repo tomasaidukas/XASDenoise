@@ -1245,10 +1245,10 @@ class GPDenoiser:
         plt.tight_layout() 
         
         if (X<0).sum() > 0:
-            plt.xlabel(r'Wavenumber k (\\AA$^{-1}$)')
+            plt.xlabel(r'Wavenumber k ($\\AA^{-1}$)')
         else:
             plt.xlabel("Energy, (eV)")
-        plt.ylabel("Absorption, \\mu(E)")
+        plt.ylabel(r"Absorption, $\\mu(E)$")
         
         plt.show()
 
