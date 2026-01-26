@@ -289,7 +289,7 @@ class XASDatabase:
             E_pre_edge = kwargs['E_pre_edge']
             E_post_edge = kwargs['E_post_edge'] 
             N_pts = kwargs['N_pts']
-            energy_grid = resampling_utils.create_energy_grid(grid_type, E_pre_edge, E_post_edge, N_pts, **kwargs)
+            energy_grid = resampling_utils.create_energy_grid(grid_type, E_pre_edge, E_post_edge, N_pts)
             
         # Process each spectrum
         for spectrum in spectra:
