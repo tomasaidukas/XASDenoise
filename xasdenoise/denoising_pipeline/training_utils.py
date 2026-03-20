@@ -4,7 +4,7 @@ Prepare training data for the autoencoder model.
 
 import numpy as np
 from xasdenoise.denoising_pipeline import PipelineConfig, DenoisingPipeline
-from xasdenoise.denoising_methods.denoisers import AutoencoderDenoiser
+from xasdenoise.denoising_methods.denoisers import AutoencoderDenoiser, TemporalAutoencoderDenoiser
 from sklearn.model_selection import train_test_split
 import tqdm
 
@@ -71,8 +71,24 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
     
     processed_data = process_training_data(spectrum_obj, config, denoiser)
     
-    y_data = processed_data.get('y')  # Shape: (n_energy, n_pairs)
-    n_energy, n_pairs0 = y_data.shape
+    y_data = processed_data.get('y')
+    if y_data.ndim == 2:
+        # [data_len, sample_num]
+        n_pairs0 = y_data.shape[1]
+
+        def _get_observation(idx):
+            return y_data[:, idx]
+    elif y_data.ndim == 3:
+        # [data_len, num_channels, sample_num] -> [num_channels, data_len]
+        n_pairs0 = y_data.shape[2]
+
+        def _get_observation(idx):
+            return y_data[:, :, idx].T
+    else:
+        raise ValueError(
+            f"Unsupported y_data shape: {y_data.shape}. Expected 2D [data_len, sample_num] "
+            "or 3D [data_len, num_channels, sample_num]."
+        )
     
     if pair_window_size > 1:
         pair_window_size = pair_window_size // 2
@@ -86,13 +102,13 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
         
         for t in range(n_pairs0 - 1):
             # Pair sequential observations
-            y_train_list.append(y_data[:, t])
-            y_target_list.append(y_data[:, t + 1])
+            y_train_list.append(_get_observation(t))
+            y_target_list.append(_get_observation(t + 1))
             y_pair_indices.append(t)
 
             # Make sure A = denoise(B) and B = denoise(A)
-            y_target_list.append(y_data[:, t])
-            y_train_list.append(y_data[:, t + 1])
+            y_target_list.append(_get_observation(t))
+            y_train_list.append(_get_observation(t + 1))
             y_pair_indices.append(t)
     
     elif pairing_strategy == 'sequential':
@@ -104,10 +120,35 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
         y_pair_indices = []
         
         for t in range(n_pairs0 - 1):
-            y_train_list.append(y_data[:, t])
-            y_target_list.append(y_data[:, t + 1])
+            y_train_list.append(_get_observation(t))
+            y_target_list.append(_get_observation(t + 1))
             y_pair_indices.append(t)
-              
+    
+    elif pairing_strategy == 'window_average':
+        # Pair averaged observations within a window to the center
+        y_train_list = []
+        y_target_list = []
+        y_pair_indices = []
+
+        for t in range(n_pairs0):
+            t_min = max(0, t - pair_window_size)
+            t_max = min(n_pairs0, t + pair_window_size + 1)
+
+            neigh = []
+            for tn in range(t_min, t_max):
+                if tn != t:
+                    neigh.append(_get_observation(tn))
+
+            if len(neigh) == 0:
+                continue
+
+            x = np.mean(neigh, axis=0)     # input = avg neighbors
+            y = _get_observation(t)        # target = center
+
+            y_train_list.append(x)
+            y_target_list.append(y)
+            y_pair_indices.append(t)
+            
     elif pairing_strategy == 'window_sequential':
         # Pair each observation with neighbors within a window
         y_train_list = []
@@ -122,8 +163,8 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
             # Pair with all neighbors in window (excluding self)
             for t_neighbor in range(t_min, t_max):
                 if t_neighbor != t:  # Exclude self-pairing
-                    y_train_list.append(y_data[:, t])
-                    y_target_list.append(y_data[:, t_neighbor])
+                    y_train_list.append(_get_observation(t))
+                    y_target_list.append(_get_observation(t_neighbor))
                     # Keep track of original observation index such that we can identify
                     # which pairs belong together
                     y_pair_indices.append(t) 
@@ -142,16 +183,16 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
             # Pair with all neighbors in window (excluding self)
             for t_neighbor in range(t_min, t_max):
                 if t_neighbor != t:  # Exclude self-pairing
-                    y_train_list.append(y_data[:, t])
-                    y_target_list.append(y_data[:, t_neighbor])
+                    y_train_list.append(_get_observation(t))
+                    y_target_list.append(_get_observation(t_neighbor))
                     # Keep track of original observation index such that we can identify
                     # which pairs belong together
                     y_pair_indices.append(t) 
                     
                     # Also add the reverse pair for symmetry
                     # Make sure A = denoise(B) and B = denoise(A)
-                    y_train_list.append(y_data[:, t_neighbor])
-                    y_target_list.append(y_data[:, t])
+                    y_train_list.append(_get_observation(t_neighbor))
+                    y_target_list.append(_get_observation(t))
                     # Keep track of original observation index such that we can identify
                     # which pairs belong together
                     y_pair_indices.append(t) 
@@ -165,13 +206,13 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
         for i in range(n_pairs0):
             for j in range(i + 1, n_pairs0):
                 # Add pair (i, j)
-                y_train_list.append(y_data[:, i])
-                y_target_list.append(y_data[:, j])
+                y_train_list.append(_get_observation(i))
+                y_target_list.append(_get_observation(j))
                 y_pair_indices.append(i)
                         
                 # Add reverse pair (j, i) for symmetry
-                y_train_list.append(y_data[:, j])
-                y_target_list.append(y_data[:, i])
+                y_train_list.append(_get_observation(j))
+                y_target_list.append(_get_observation(i))
                 y_pair_indices.append(j)
     else:
         raise ValueError(f"Invalid pairing_strategy: {pairing_strategy}. "
@@ -180,8 +221,8 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
     n_pairs = len(y_train_list)
 
     # Convert lists to arrays
-    processed_data['y_train'] = np.array(y_train_list)  # Shape: (n_pairs, n_energy)
-    processed_data['y_target'] = np.array(y_target_list)  # Shape: (n_pairs, n_energy)
+    processed_data['y_train'] = np.array(y_train_list)
+    processed_data['y_target'] = np.array(y_target_list)
     processed_data['y_pair_indices'] = np.array(y_pair_indices)
     
     # Replicate other arrays to match number of pairs
@@ -208,7 +249,7 @@ def create_noise2noise_data(spectrum_obj, config=None, denoiser=None,
     # Print statistics
     print(f"Pairing strategy: {pairing_strategy}")
     if pairing_strategy == 'window':
-        print(f"  Pairing window size: {pair_window_size}")
+        print(f"  Pairing window size: {pair_window_size*2}")
     print(f"  Number of observations: {n_pairs0}")
     print(f"  Training pairs: {n_pairs}")
     print(f"  Data augmentation factor: {n_pairs / n_pairs0:.1f}x")
@@ -233,9 +274,21 @@ def create_noise2clean(spectrum_obj, config=None, denoiser=None):
         processed_data = process_training_data(spectrum_obj, config, denoiser)
     y_target = processed_data.get('y')
     
-    # Target dataset will be the the average of all noisy observations within a given spectrum
-    processed_data['y_train'] = y_train.T
-    processed_data['y_target'] = np.repeat(np.mean(y_target, axis=1)[:, None], y_train.shape[1], axis=1).T
+    # Target dataset will be the average of all noisy observations within a given spectrum.
+    if y_train.ndim == 2:
+        processed_data['y_train'] = y_train.T
+        processed_data['y_target'] = np.repeat(np.mean(y_target, axis=1)[:, None], y_train.shape[1], axis=1).T
+    elif y_train.ndim == 3:
+        # Input format: [data_len, num_channels, sample_num]
+        processed_data['y_train'] = np.transpose(y_train, (2, 1, 0))
+        y_target_mean = np.mean(y_target, axis=2)  # [data_len, num_channels]
+        y_target_mean = y_target_mean.T            # [num_channels, data_len]
+        processed_data['y_target'] = np.repeat(y_target_mean[None, :, :], y_train.shape[2], axis=0)
+    else:
+        raise ValueError(
+            f"Unsupported y_train shape: {y_train.shape}. Expected 2D [data_len, sample_num] "
+            "or 3D [data_len, num_channels, sample_num]."
+        )
     
     # Create the other arrays through replication for training
     num_pairs = processed_data['y_train'].shape[0]
@@ -300,8 +353,20 @@ def prepare_training_data(spectrum_obj_list, config=None, denoiser=None,
     # Pad arrays to same length and then concatenate
     processed_data_all = _pad_and_concatenate_arrays(processed_data_lists, valid_keys)
     
+    processed_data_all = _process_complex_arrays(processed_data_all)
+    
     return processed_data_all
-       
+
+def _process_complex_arrays(processed_data):
+    for key, value in processed_data.items():
+        if np.iscomplexobj(value):
+            tmp_arr = np.zeros((value.shape[0], 2, value.shape[1]))
+            tmp_arr[:, 0, :] = np.real(value)
+            tmp_arr[:, 1, :] = np.imag(value)
+            processed_data[key] = tmp_arr
+
+    return processed_data
+        
 def _collect_arrays_in_lists(processed_data_lists, new_data, keys):
     """
     Collect arrays in lists instead of concatenating immediately.
@@ -418,12 +483,28 @@ def _pad_arrays_to_same_length(x0, y_train0, y_target0, data_mask0, edges0):
                 
                 # Pad the arrays
                 x0[i] = np.pad(x0[i], (pre_edge_pad, post_edge_pad), mode='edge')
-                y_train0[i] = np.pad(y_train0[i], (pre_edge_pad, post_edge_pad), mode='edge')
-                y_target0[i] = np.pad(y_target0[i], (pre_edge_pad, post_edge_pad), mode='edge')
+                if y_train0[i].ndim == 1:
+                    y_train0[i] = np.pad(y_train0[i], (pre_edge_pad, post_edge_pad), mode='edge')
+                else:
+                    pad_width = [(0, 0)] * y_train0[i].ndim
+                    pad_width[-1] = (pre_edge_pad, post_edge_pad)
+                    y_train0[i] = np.pad(y_train0[i], pad_width, mode='edge')
+
+                if y_target0[i].ndim == 1:
+                    y_target0[i] = np.pad(y_target0[i], (pre_edge_pad, post_edge_pad), mode='edge')
+                else:
+                    pad_width = [(0, 0)] * y_target0[i].ndim
+                    pad_width[-1] = (pre_edge_pad, post_edge_pad)
+                    y_target0[i] = np.pad(y_target0[i], pad_width, mode='edge')
                 
                 # Handle data_mask which might be None or contain None values
                 if data_mask0 and i < len(data_mask0) and data_mask0[i] is not None:
-                    data_mask0[i] = np.pad(data_mask0[i], (pre_edge_pad, post_edge_pad), mode='constant', constant_values=False)
+                    if data_mask0[i].ndim == 1:
+                        data_mask0[i] = np.pad(data_mask0[i], (pre_edge_pad, post_edge_pad), mode='constant', constant_values=False)
+                    else:
+                        pad_width = [(0, 0)] * data_mask0[i].ndim
+                        pad_width[-1] = (pre_edge_pad, post_edge_pad)
+                        data_mask0[i] = np.pad(data_mask0[i], pad_width, mode='constant', constant_values=False)
                 elif data_mask0 and i < len(data_mask0):
                     # Create a default mask if it was None
                     data_mask0[i] = np.ones(max_len, dtype=bool)
@@ -471,13 +552,15 @@ def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=Non
         'gpu_index': model_params.get('gpu_index', None),
         'num_layers': model_params.get('num_layers', 4),
         'kernel_size': model_params.get('kernel_size', 11),
+        'dilation': model_params.get('dilation', 1),
         'dropout_rate': model_params.get('dropout_rate', 0),
-        'channels': model_params.get('channels', None),
+        'layers': model_params.get('layers', model_params.get('channels', None)),
         'normalization_method': model_params.get('normalization_method', None),
         'bias': model_params.get('bias', False),
         'output_mode': model_params.get('output_mode', 'direct'),
         'output_nonnegativity': model_params.get('output_nonnegativity', False),
-        'transpose_input': model_params.get('transpose_input', False)
+        'transpose_input': model_params.get('transpose_input', False),
+        'input_channels': model_params.get('input_channels', 1)
     }
     
     # Training parameters with defaults
@@ -507,6 +590,88 @@ def train_autoencoder_model(spectrum_obj_list, config=None, denoiser_preproc=Non
 
     return denoiser, training_metrics
 
+
+def train_temporal_autoencoder_model(spectrum_time_series, config=None, denoiser_preproc=None, method='noise2noise',
+                        pairing_strategy='adjacent', pair_window_size=1,
+                        model_params=None, training_params=None):
+    """
+    Prepare training data and train the autoencoder model.
+    
+    Args:
+        spectrum_time_series (Spectrum): A Spectrum object containing the time series data as a 2D array (spectrum_time_series.spectrum.shape = (energy_points, time_steps)).
+        config (PipelineConfig): Pipeline configuration object for data processing.
+        denoiser_preproc (Denoiser): Denoiser object for denoising the data during preprocessing.
+        method (str): The method to use for training data preparation ('noise2noise' or 'noise2clean').
+        pairing_strategy (str): Pairing strategy for noise2noise ('adjacent', 'window', 'all_pairs').
+        pair_window_size (int): Window size within which the data are paired.
+        model_path (str): Path to save the trained model.
+        training_params (dict): Dictionary of training parameters.
+        
+    Returns:
+        EncoderModel: Trained autoencoder model.
+    """
+    if config is None:
+        # Create a default pipeline configuration
+        config = PipelineConfig(
+            verbose=0,
+        )
+        
+    processed_data = prepare_training_data(spectrum_time_series, config, denoiser_preproc, method=method,
+                                           pairing_strategy=pairing_strategy, pair_window_size=pair_window_size)
+
+    # Parameter which determines if data should be shuffled
+    if pairing_strategy == 'window':
+        dont_shuffle = True
+    else:
+        dont_shuffle = False
+        
+        # Model initialization parameters with defaults
+    model_params = {
+        'model_type': model_params.get('model_type', 'conv'),
+        'device': model_params.get('device', 'auto'),
+        'gpu_index': model_params.get('gpu_index', None),
+        'num_layers': model_params.get('num_layers', 4),
+        'kernel_size': model_params.get('kernel_size', 11),
+        'time_kernel_size': model_params.get('time_kernel_size', 11),
+        'dropout_rate': model_params.get('dropout_rate', 0),
+        'channels': model_params.get('layers', model_params.get('channels', None)),
+        'normalization_method': model_params.get('normalization_method', None),
+        'bias': model_params.get('bias', False),
+        'output_mode': model_params.get('output_mode', 'direct'),
+        'output_nonnegativity': model_params.get('output_nonnegativity', False),
+        'transpose_input': model_params.get('transpose_input', False)
+    }
+    
+    # Training parameters with defaults
+    training_params = {
+        'batch_size': training_params.get('batch_size', 16),
+        'num_epochs': training_params.get('num_epochs', 100),
+        'learning_rate': training_params.get('learning_rate', 1e-4),
+        'augment_data': training_params.get('augment_data', False),
+        'remove_padded_regions': training_params.get('remove_padded_regions', False),
+        'save_path': training_params.get('save_path', None),
+        'early_stopping_patience': training_params.get('early_stopping_patience', 50),
+        'weight_decay': training_params.get('weight_decay', 1e-5),
+        'loss_weights': training_params.get('loss_weights', None),
+        'temporal_smoothness_lambda': training_params.get('temporal_smoothness_lambda', 0.0),
+        'static_region_mask': training_params.get('static_region_mask', None),
+        'static_region_weight': training_params.get('static_region_weight', 1.0),
+        'dont_shuffle': training_params.get('dont_shuffle', dont_shuffle)
+    }
+
+    # Define model type and initialize the denoiser
+    denoiser = TemporalAutoencoderDenoiser(**model_params)
+
+    # Train the model
+    training_metrics = denoiser.train_model(
+        y_train=processed_data['y_train'],  # Noisy spectra as input
+        y_target=processed_data['y_target'],  # Clean spectra as target
+        mask_train=processed_data['data_mask'],  # Data mask
+        y_pair_indices=processed_data.get('y_pair_indices', None),  # Pair indices
+        **training_params
+    )
+
+    return denoiser, training_metrics
 
 def split_by_compounds(compounds, compounds_for_test=[], compounds_to_exclude=[], train_frac=0.9, val_frac=0.05, test_frac=0.05, random_state=42):
     """

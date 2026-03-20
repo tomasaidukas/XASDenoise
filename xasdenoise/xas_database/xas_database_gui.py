@@ -527,7 +527,7 @@ class InteractiveDataProcessing:
             else:
                name_count[name] = 0
         
-        self.compound_idx = 0
+        self.compound_idx = 0 if len(self.spectrum_list) > 0 else None
         self.initial_glitch_masks = copy.deepcopy(self.glitch_masks)
         self.current_glitch_masks = copy.deepcopy(self.glitch_masks)
     
@@ -998,12 +998,12 @@ class InteractiveDataProcessing:
         self.is_updating_compound = True
 
         # Load element data and update related UI components
-        self.selected_monochromator = self.monochromator_options[0]
+        self.selected_monochromator = 'All'
         self.load_element_data()
         self.compound_dropdown.options = ['All'] + self.spectrum_names  # Update compound options
-        self.compound_dropdown.value = self.spectrum_names[0]  # Reset to the first compound
-        self.monochromator_dropdown.options = ['All'] + list(np.unique([s.metadata['monochromator'] for s in self.spectrum_list]))
-        self.monochromator_dropdown.value = self.monochromator_options[0]
+        self.compound_dropdown.value = self.spectrum_names[0] if self.spectrum_names else 'All'  # Reset safely
+        self.monochromator_dropdown.options = self.monochromator_options
+        self.monochromator_dropdown.value = self.monochromator_options[0] if self.monochromator_options else 'All'
         
         
         # Allow compound changes again
@@ -1034,7 +1034,7 @@ class InteractiveDataProcessing:
         # Reload element data if monochromator affects it
         self.load_element_data()
         self.compound_dropdown.options = ['All'] + self.spectrum_names  # Update compound options
-        self.compound_dropdown.value = self.spectrum_names[0]  # Reset to the first compound
+        self.compound_dropdown.value = self.spectrum_names[0] if self.spectrum_names else 'All'  # Reset safely
 
         # Allow compound changes again
         self.is_updating_compound = False
@@ -1062,7 +1062,7 @@ class InteractiveDataProcessing:
         selected_value = change['new']
 
         # Update compound index based on the selected value
-        self.compound_idx = None if selected_value == "All" else self.spectrum_names.index(selected_value)
+        self.compound_idx = None if selected_value == "All" or selected_value not in self.spectrum_names else self.spectrum_names.index(selected_value)
 
         # Update the plot for the selected compound
         self.initialize_plot()
